@@ -227,12 +227,24 @@ export default function AnalyticsView() {
       {/* SUBTAB 1: LIFT ANALYSIS & THRESHOLD CALIBRATOR */}
       {activeSubTab === 'lift' && (
         <div className="space-y-6">
+          {(!liftData?.total_patients || liftData?.status === 'no_data') && (
+            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/80 rounded-2xl p-4 flex items-start space-x-3 text-amber-900 dark:text-amber-200 text-xs">
+              <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-bold">ยังไม่มีข้อมูลการประเมิน Lift Analysis สำหรับโรงพยาบาลนี้</div>
+                <div className="text-amber-800/90 dark:text-amber-300/80">
+                  ระบบไม่แสดงข้อมูลสมมติ เพื่อความถูกต้องตามหลักคลินิก จะสามารถคำนวณ Lift Analysis และตาราง 10-Decile ได้เมื่อมีการสกัดข้อมูลย้อนหลัง (Bootstrap) จาก HOSxP ประจำโรงพยาบาล หรือมีข้อมูลการบันทึกผลลัพธ์จริง (Outcome Feedback) สะสมในระบบ
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Executive Overview Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
               <div className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase">กลุ่มประชากรทดสอบ (Cohort)</div>
               <div className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 mt-1">
-                {liftData?.total_patients ? liftData.total_patients.toLocaleString() : '10,188'} <span className="text-xs font-normal text-slate-400">ราย</span>
+                {liftData?.total_patients ? liftData.total_patients.toLocaleString() : '-'} <span className="text-xs font-normal text-slate-400">ราย</span>
               </div>
               <div className="text-[11px] text-slate-500 mt-0.5">Ground-truth validation set</div>
             </div>
@@ -240,20 +252,20 @@ export default function AnalyticsView() {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
               <div className="text-[11px] font-semibold text-rose-500 uppercase">อัตราการล้มเฉลี่ย (Base Rate)</div>
               <div className="text-2xl font-extrabold text-rose-600 dark:text-rose-400 mt-1">
-                {liftData?.base_fall_rate_pct || 7.47}%
+                {liftData?.base_fall_rate_pct != null ? `${liftData.base_fall_rate_pct}%` : '-'}
               </div>
               <div className="text-[11px] text-slate-500 mt-0.5">
-                หกล้มจริง {liftData?.total_falls || 761} ครั้ง
+                {liftData?.total_falls != null ? `หกล้มจริง ${liftData.total_falls} ครั้ง` : 'รอข้อมูลผลลัพธ์จริง'}
               </div>
             </div>
 
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
               <div className="text-[11px] font-semibold text-indigo-500 uppercase">Decile 1 Lift สูงสุด</div>
               <div className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400 mt-1">
-                {liftData?.deciles?.[0]?.lift_multiplier || 3.42}x
+                {liftData?.deciles?.[0]?.lift_multiplier != null ? `${liftData.deciles[0].lift_multiplier}x` : '-'}
               </div>
               <div className="text-[11px] text-slate-500 mt-0.5">
-                แม่นยำกว่าการสุ่มปกติ {liftData?.deciles?.[0]?.lift_multiplier || 3.42} เท่า
+                {liftData?.deciles?.[0]?.lift_multiplier != null ? `แม่นยำกว่าการสุ่มปกติ ${liftData.deciles[0].lift_multiplier} เท่า` : 'รอคำนวณจากข้อมูล รพ.'}
               </div>
             </div>
 
@@ -596,8 +608,8 @@ export default function AnalyticsView() {
             )}
 
             <div className="p-4 bg-slate-50 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 space-y-1">
-              <p>• <strong>Lift Multiplier:</strong> แสดงว่ากลุ่มผู้ป่วยใน Decile นั้นมีอัตราการหกล้มจริงสูงกว่าค่าเฉลี่ยสุ่มกี่เท่า (Decile 1 สูงกว่าค่าเฉลี่ย 3.42 เท่า)</p>
-              <p>• <strong>Cumulative Recall:</strong> เปอร์เซ็นต์การดักจับเคสล้มสะสม (เช่น หากคัดกรอง Top 20% จะดักจับเคสล้มได้เกือบครึ่งหนึ่งของโรงพยาบาล)</p>
+              <p>• <strong>Lift Multiplier:</strong> แสดงว่ากลุ่มผู้ป่วยใน Decile นั้นมีอัตราการหกล้มจริงสูงกว่าค่าเฉลี่ยสุ่มกี่เท่า {liftData?.deciles?.[0]?.lift_multiplier ? `(กลุ่มเสี่ยงสูงสุด Decile 1 มีสัดส่วนการหกล้มสูงกว่าค่าเฉลี่ย ${liftData.deciles[0].lift_multiplier} เท่า)` : ''}</p>
+              <p>• <strong>Cumulative Recall:</strong> เปอร์เซ็นต์การดักจับเคสล้มสะสม (เช่น หากคัดกรองกลุ่มเสี่ยงสูง 20% แรก จะดักจับเคสล้มได้เท่าใดของโรงพยาบาล)</p>
               <p>• <strong>NNI (Number Needed to Intervene):</strong> จำนวนผู้ป่วยที่ต้องสวมสายรัดข้อมือหรือเข้าโปรแกรมป้องกัน เพื่อช่วยป้องกันการหกล้มได้ 1 เคส</p>
             </div>
           </div>

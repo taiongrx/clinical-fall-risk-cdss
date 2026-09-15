@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import os
 import pandas as pd
 import numpy as np
@@ -25,6 +25,27 @@ def get_scored_evaluation_dataset() -> pd.DataFrame:
         p_path = 'df_final_factors_preprocessed.parquet'
 
     if not os.path.exists(p_path):
+        # Fallback to local hospital database outcomes if available
+        db = SessionLocal()
+        try:
+            from ..database import FallOutcome, Assessment
+            outcomes = db.query(FallOutcome).join(Assessment).all()
+            if len(outcomes) >= 10:
+                rows = []
+                for o in outcomes:
+                    rows.append({
+                        'hn': o.assessment.hn,
+                        'actual_fall': 1 if o.did_fall else 0,
+                        'pred_prob': float(o.assessment.risk_score or 0.5)
+                    })
+                if rows:
+                    df_scored = pd.DataFrame(rows)
+                    _cached_df_scored = df_scored
+                    return _cached_df_scored
+        except Exception as e:
+            print(f"[LiftAnalyzer DB Fallback Error]: {e}")
+        finally:
+            db.close()
         return pd.DataFrame()
 
     try:
