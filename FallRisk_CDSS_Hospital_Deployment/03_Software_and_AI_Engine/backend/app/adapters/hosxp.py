@@ -1,7 +1,8 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple
 
@@ -22,9 +23,14 @@ class HOSxPAdapter(BaseHISAdapter):
         if self._engine is not None:
             return self._engine
         try:
-            db_url = (
-                f"mysql+mysqlconnector://{settings.HOSXP_USER}:{settings.HOSXP_PASSWORD}"
-                f"@{settings.HOSXP_HOST}:{settings.HOSXP_PORT}/{settings.HOSXP_DB}"
+            clean_host = settings.HOSXP_HOST.split("@")[-1].strip() if "@" in str(settings.HOSXP_HOST) else str(settings.HOSXP_HOST).strip()
+            db_url = URL.create(
+                drivername="mysql+mysqlconnector",
+                username=settings.HOSXP_USER.strip() if settings.HOSXP_USER else "sa",
+                password=settings.HOSXP_PASSWORD if settings.HOSXP_PASSWORD else "",
+                host=clean_host,
+                port=settings.HOSXP_PORT,
+                database=settings.HOSXP_DB.strip() if settings.HOSXP_DB else "hos"
             )
             self._engine = create_engine(
                 db_url,
@@ -126,23 +132,54 @@ class HOSxPAdapter(BaseHISAdapter):
                 if not visit_df.empty:
                     visit_df['index_date'] = index_date
 
-                # 2. Medications with DID, TMT, and ATC resolution
+                # 2. Medications with DID, TMT (TPU list resolved), and ATC resolution
                 query_med = """
                     SELECT o.hn, o.icode, d.name as drug_name, 
                            d.generic_name, d.therapeuticgroup as raw_group_name,
-                           d.did, d.tmt_tp_code, d.tmt_gp_code,
+                           d.did, 
+                           COALESCE(NULLIF(tpu.tpu_code, ''), NULLIF(d.tmt_tp_code, ''), NULLIF(d.tmt_gp_code, '')) as tmt_tp_code,
+                           COALESCE(NULLIF(g.gpu_code, ''), NULLIF(d.tmt_gp_code, '')) as tmt_gp_code,
                            MIN(o.vstdate) as first_vstdate, MAX(o.vstdate) as med_date,
                            DATEDIFF(MAX(o.vstdate), MIN(o.vstdate)) as duration_in_days
                     FROM opitemrece o
                     JOIN drugitems d ON o.icode = d.icode
+                    LEFT JOIN (
+                        SELECT icode, MAX(tpu_code) as tpu_code 
+                        FROM drugitems_tmt_tpu_list 
+                        WHERE active_status = 'Y' OR active_status IS NULL
+                        GROUP BY icode
+                    ) tpu ON d.icode = tpu.icode
+                    LEFT JOIN (
+                        SELECT tpu_code, MAX(gpu_code) as gpu_code
+                        FROM tmt_gpu_to_tpu
+                        GROUP BY tpu_code
+                    ) g ON COALESCE(NULLIF(tpu.tpu_code, ''), NULLIF(d.tmt_tp_code, '')) = g.tpu_code
                     WHERE o.hn = %(hn_param)s
                       AND o.vstdate BETWEEN %(start_date_param)s AND %(end_date_param)s
                       AND d.name IS NOT NULL AND d.name != ''
-                    GROUP BY o.hn, o.icode, d.name, d.generic_name, d.therapeuticgroup, d.did, d.tmt_tp_code, d.tmt_gp_code
+                    GROUP BY o.hn, o.icode, d.name, d.generic_name, d.therapeuticgroup, d.did, d.tmt_tp_code, d.tmt_gp_code, tpu.tpu_code, g.gpu_code
                     ORDER BY med_date DESC
                 """
                 params_med = {'hn_param': hn, 'start_date_param': med_history_start_date, 'end_date_param': index_date_str}
-                med_df = pd.read_sql(query_med, conn, params=params_med)
+                try:
+                    med_df = pd.read_sql(query_med, conn, params=params_med)
+                except Exception as e_med_join:
+                    # Fallback query if tpu list table does not exist
+                    q_med_fb = """
+                        SELECT o.hn, o.icode, d.name as drug_name, 
+                               d.generic_name, d.therapeuticgroup as raw_group_name,
+                               d.did, d.tmt_tp_code, d.tmt_gp_code,
+                               MIN(o.vstdate) as first_vstdate, MAX(o.vstdate) as med_date,
+                               DATEDIFF(MAX(o.vstdate), MIN(o.vstdate)) as duration_in_days
+                        FROM opitemrece o
+                        JOIN drugitems d ON o.icode = d.icode
+                        WHERE o.hn = %(hn_param)s
+                          AND o.vstdate BETWEEN %(start_date_param)s AND %(end_date_param)s
+                          AND d.name IS NOT NULL AND d.name != ''
+                        GROUP BY o.hn, o.icode, d.name, d.generic_name, d.therapeuticgroup, d.did, d.tmt_tp_code, d.tmt_gp_code
+                        ORDER BY med_date DESC
+                    """
+                    med_df = pd.read_sql(q_med_fb, conn, params=params_med)
 
                 if not med_df.empty:
                     from ..ml.atc_tagger import tag_drug_atc
@@ -311,18 +348,127 @@ class HOSxPAdapter(BaseHISAdapter):
         try:
             with engine.connect() as conn:
                 q = """
-                    SELECT icode, name as drug_name, generic_name, 
-                           did, tmt_tp_code, tmt_gp_code,
-                           therapeuticgroup as raw_group 
-                    FROM drugitems 
-                    WHERE name IS NOT NULL AND name != ''
+                    SELECT d.icode, d.name as drug_name, d.generic_name, 
+                           d.did, 
+                           COALESCE(NULLIF(tpu.tpu_code, ''), NULLIF(d.tmt_tp_code, ''), NULLIF(d.tmt_gp_code, '')) as tmt_tp_code,
+                           COALESCE(NULLIF(g.gpu_code, ''), NULLIF(d.tmt_gp_code, '')) as tmt_gp_code,
+                           d.therapeuticgroup as raw_group 
+                    FROM drugitems d
+                    LEFT JOIN (
+                        SELECT icode, MAX(tpu_code) as tpu_code 
+                        FROM drugitems_tmt_tpu_list 
+                        WHERE active_status = 'Y' OR active_status IS NULL
+                        GROUP BY icode
+                    ) tpu ON d.icode = tpu.icode
+                    LEFT JOIN (
+                        SELECT tpu_code, MAX(gpu_code) as gpu_code
+                        FROM tmt_gpu_to_tpu
+                        GROUP BY tpu_code
+                    ) g ON COALESCE(NULLIF(tpu.tpu_code, ''), NULLIF(d.tmt_tp_code, '')) = g.tpu_code
+                    WHERE d.name IS NOT NULL AND d.name != ''
                 """
                 params = {}
                 if search and search.strip():
-                    q += " AND (name LIKE %(s)s OR generic_name LIKE %(s)s OR icode LIKE %(s)s OR did LIKE %(s)s)"
+                    q += " AND (d.name LIKE %(s)s OR d.generic_name LIKE %(s)s OR d.icode LIKE %(s)s OR d.did LIKE %(s)s OR tpu.tpu_code LIKE %(s)s)"
                     params['s'] = f"%{search.strip()}%"
-                q += f" ORDER BY name ASC LIMIT {int(limit)}"
-                return pd.read_sql(q, conn, params=params)
+                q += f" ORDER BY d.name ASC LIMIT {int(limit)}"
+                try:
+                    return pd.read_sql(q, conn, params=params)
+                except Exception as e_tpu:
+                    # Fallback to standard drugitems table if sub-tables do not exist
+                    q_fb = """
+                        SELECT icode, name as drug_name, generic_name, 
+                               did, tmt_tp_code, tmt_gp_code,
+                               therapeuticgroup as raw_group 
+                        FROM drugitems 
+                        WHERE name IS NOT NULL AND name != ''
+                    """
+                    if search and search.strip():
+                        q_fb += " AND (name LIKE %(s)s OR generic_name LIKE %(s)s OR icode LIKE %(s)s OR did LIKE %(s)s)"
+                    q_fb += f" ORDER BY name ASC LIMIT {int(limit)}"
+                    return pd.read_sql(q_fb, conn, params=params)
         except Exception as e:
             print(f"[HOSxPAdapter] fetch_hospital_formulary failed: {e}")
             return pd.DataFrame()
+
+    def fetch_drugs_with_tmt_hierarchy(self, limit: int = 5000) -> pd.DataFrame:
+        """
+        Returns hospital drug formulary resolved with TMT Hierarchy (TPU -> GPU -> Substance).
+        Leverages drugitems_tmt_tpu_list, tmt_gpu_to_tpu, tmt_gpu_code, and tmt_substance_code.
+        """
+        engine = self.get_engine()
+        if not engine:
+            return pd.DataFrame()
+
+        try:
+            with engine.connect() as conn:
+                q = """
+                    SELECT 
+                        d.icode, 
+                        d.name as drug_name, 
+                        d.generic_name, 
+                        d.did,
+                        COALESCE(NULLIF(tpu.tpu_code, ''), NULLIF(d.tmt_tp_code, '')) as tpu_code,
+                        COALESCE(NULLIF(g.gpu_code, ''), NULLIF(d.tmt_gp_code, '')) as gpu_code,
+                        c.gpu_name,
+                        sc.substance_name,
+                        d.therapeuticgroup as raw_group
+                    FROM drugitems d
+                    LEFT JOIN (
+                        SELECT icode, MAX(tpu_code) as tpu_code
+                        FROM drugitems_tmt_tpu_list
+                        WHERE active_status = 'Y' OR active_status IS NULL
+                        GROUP BY icode
+                    ) tpu ON d.icode = tpu.icode
+                    LEFT JOIN (
+                        SELECT tpu_code, MAX(gpu_code) as gpu_code
+                        FROM tmt_gpu_to_tpu
+                        GROUP BY tpu_code
+                    ) g ON COALESCE(NULLIF(tpu.tpu_code, ''), NULLIF(d.tmt_tp_code, '')) = g.tpu_code
+                    LEFT JOIN tmt_gpu_code c ON COALESCE(NULLIF(g.gpu_code, ''), NULLIF(d.tmt_gp_code, '')) = c.gpu_code
+                    LEFT JOIN (
+                        SELECT gpg.gpu_code, MAX(sc.substance_name) as substance_name
+                        FROM tmt_gp_to_gpu gpg
+                        JOIN tmt_vtm_to_gp vg ON gpg.gp_code = vg.gp_code
+                        JOIN tmt_sub_to_vtm sv ON vg.vtm_code = sv.vtm_code
+                        JOIN tmt_substance_code sc ON sv.substance_code = sc.substance_code
+                        GROUP BY gpg.gpu_code
+                    ) sc ON COALESCE(NULLIF(g.gpu_code, ''), NULLIF(d.tmt_gp_code, '')) = sc.gpu_code
+                    WHERE d.name IS NOT NULL AND d.name != ''
+                    ORDER BY d.name ASC
+                    LIMIT %(limit)s
+                """
+                try:
+                    df = pd.read_sql(q, conn, params={'limit': int(limit)})
+                    df['icode'] = df['icode'].astype(str).str.strip()
+                    df['drug_name'] = df['drug_name'].fillna('').astype(str).str.strip()
+                    df['generic_name'] = df['generic_name'].fillna('').astype(str).str.strip()
+                    df['tpu_code'] = df['tpu_code'].fillna('').astype(str).str.strip()
+                    df['gpu_code'] = df['gpu_code'].fillna('').astype(str).str.strip()
+                    df['gpu_name'] = df['gpu_name'].fillna('').astype(str).str.strip()
+                    df['substance_name'] = df['substance_name'].fillna('').astype(str).str.strip()
+                    return df
+                except Exception as e_sql:
+                    print(f"[HOSxPAdapter] Optimized TMT hierarchy query failed ({e_sql}), falling back to basic drugitems")
+                    q_fb = """
+                        SELECT icode, name as drug_name, generic_name, did,
+                               tmt_tp_code as tpu_code, tmt_gp_code as gpu_code,
+                               '' as gpu_name, '' as substance_name, therapeuticgroup as raw_group
+                        FROM drugitems
+                        WHERE name IS NOT NULL AND name != ''
+                        ORDER BY name ASC
+                        LIMIT %(limit)s
+                    """
+                    df = pd.read_sql(q_fb, conn, params={'limit': int(limit)})
+                    df['icode'] = df['icode'].astype(str).str.strip()
+                    df['drug_name'] = df['drug_name'].fillna('').astype(str).str.strip()
+                    df['generic_name'] = df['generic_name'].fillna('').astype(str).str.strip()
+                    df['tpu_code'] = df['tpu_code'].fillna('').astype(str).str.strip()
+                    df['gpu_code'] = df['gpu_code'].fillna('').astype(str).str.strip()
+                    df['gpu_name'] = ''
+                    df['substance_name'] = ''
+                    return df
+        except Exception as e:
+            print(f"[HOSxPAdapter] fetch_drugs_with_tmt_hierarchy error: {e}")
+            return pd.DataFrame()
+

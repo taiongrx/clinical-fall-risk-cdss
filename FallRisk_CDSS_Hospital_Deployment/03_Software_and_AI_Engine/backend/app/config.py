@@ -1,5 +1,6 @@
 import os
 import sys
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 # Load TOML secrets if available (Python 3.11+ built-in tomllib)
@@ -62,11 +63,11 @@ class Settings(BaseSettings):
     ))
     
     # HOSxP Connection
-    HOSXP_HOST: str = str(resolve_val("HOSXP_HOST", hosxp_conf.get("host"), "192.168.0.250"))
+    HOSXP_HOST: str = str(resolve_val("HOSXP_HOST", hosxp_conf.get("host"), "192.168.0.250")).strip().split("@")[-1].strip()
     HOSXP_PORT: int = int(resolve_val("HOSXP_PORT", hosxp_conf.get("port"), 3306))
-    HOSXP_USER: str = str(resolve_val("HOSXP_USER", hosxp_conf.get("user"), "sa"))
+    HOSXP_USER: str = str(resolve_val("HOSXP_USER", hosxp_conf.get("user"), "sa")).strip()
     HOSXP_PASSWORD: str = str(resolve_val("HOSXP_PASSWORD", hosxp_conf.get("password"), "sa"))
-    HOSXP_DB: str = str(resolve_val("HOSXP_DB", hosxp_conf.get("database"), "hos"))
+    HOSXP_DB: str = str(resolve_val("HOSXP_DB", hosxp_conf.get("database"), "hos")).strip()
     
     DEFAULT_THRESHOLD: float = float(resolve_val("DEFAULT_THRESHOLD", ml_conf.get("default_threshold"), 0.47))
     MODELS_DIR: str = str(resolve_val("MODELS_DIR", None, "models_storage"))
@@ -82,6 +83,20 @@ class Settings(BaseSettings):
     JWT_EXPIRATION_HOURS: int = int(resolve_val("JWT_EXPIRATION_HOURS", auth_conf.get("jwt_expiration_hours"), 8))
     MAX_LOGIN_ATTEMPTS: int = int(resolve_val("MAX_LOGIN_ATTEMPTS", auth_conf.get("max_login_attempts"), 5))
     LOCKOUT_MINUTES: int = int(resolve_val("LOCKOUT_MINUTES", auth_conf.get("lockout_minutes"), 15))
+
+    @model_validator(mode="after")
+    def validate_empty_fallbacks(self):
+        if not self.HOSXP_HOST or str(self.HOSXP_HOST).strip() == "":
+            self.HOSXP_HOST = str(hosxp_conf.get("host") or "192.168.0.251")
+        if not self.HOSXP_PASSWORD or str(self.HOSXP_PASSWORD).strip() == "":
+            self.HOSXP_PASSWORD = str(hosxp_conf.get("password") or "sa")
+        if not self.HOSXP_USER or str(self.HOSXP_USER).strip() == "":
+            self.HOSXP_USER = str(hosxp_conf.get("user") or "sa")
+        if not self.HOSXP_DB or str(self.HOSXP_DB).strip() == "":
+            self.HOSXP_DB = str(hosxp_conf.get("database") or "hos")
+        if not self.JWT_SECRET_KEY or str(self.JWT_SECRET_KEY).strip() == "":
+            self.JWT_SECRET_KEY = str(auth_conf.get("jwt_secret_key") or "saiburi-hospital-fallrisk-super-secret-key-2026-secure-jwt")
+        return self
 
     class Config:
         case_sensitive = True

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 # ================================================================
 # install.ps1 — Fall Risk Platform Installer (Production)
 # รองรับ: Windows Server 2019/2022, Windows 10/11 (64-bit)
@@ -45,14 +45,18 @@ Write-Step "Collecting Configuration..."
 if (-not $HosxpHost) { 
     $HosxpHost = Read-Host "  HOSxP MySQL Host IP (เช่น 192.168.0.251)" 
 }
+$HosxpHost = $HosxpHost.Trim()
+if ($HosxpHost -match '@') {
+    $HosxpHost = ($HosxpHost -split '@')[-1].Trim()
+}
 
 $defaultPort = if ($HosxpPort) { $HosxpPort } else { "3306" }
 $inputPort = Read-Host "  HOSxP MySQL Port [Enter เพื่อใช้: $defaultPort]"
-if ($inputPort) { $HosxpPort = $inputPort } else { $HosxpPort = $defaultPort }
+if ($inputPort) { $HosxpPort = $inputPort.Trim() } else { $HosxpPort = $defaultPort.Trim() }
 
 $defaultUser = if ($HosxpUser) { $HosxpUser } else { "sa" }
 $inputUser = Read-Host "  HOSxP MySQL User [Enter เพื่อใช้: $defaultUser]"
-if ($inputUser) { $HosxpUser = $inputUser } else { $HosxpUser = $defaultUser }
+if ($inputUser) { $HosxpUser = $inputUser.Trim() } else { $HosxpUser = $defaultUser.Trim() }
 
 if (-not $HosxpPassword) {
     $sec = Read-Host "  HOSxP MySQL Password for '$HosxpUser'" -AsSecureString
@@ -62,7 +66,7 @@ if (-not $HosxpPassword) {
 
 $defaultDb = if ($HosxpDb) { $HosxpDb } else { "hos" }
 $inputDb = Read-Host "  HOSxP Database Name [Enter เพื่อใช้: $defaultDb]"
-if ($inputDb) { $HosxpDb = $inputDb } else { $HosxpDb = $defaultDb }
+if ($inputDb) { $HosxpDb = $inputDb.Trim() } else { $HosxpDb = $defaultDb.Trim() }
 
 $defaultHcode = if ($HospitalCode) { $HospitalCode } else { "10986" }
 $inputHcode = Read-Host "  Hospital Code 5 หลัก [Enter เพื่อใช้: $defaultHcode]"

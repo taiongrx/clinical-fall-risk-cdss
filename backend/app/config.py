@@ -63,11 +63,11 @@ class Settings(BaseSettings):
     ))
     
     # HOSxP Connection
-    HOSXP_HOST: str = str(resolve_val("HOSXP_HOST", hosxp_conf.get("host"), "192.168.0.250"))
+    HOSXP_HOST: str = str(resolve_val("HOSXP_HOST", hosxp_conf.get("host"), "192.168.0.250")).strip().split("@")[-1].strip()
     HOSXP_PORT: int = int(resolve_val("HOSXP_PORT", hosxp_conf.get("port"), 3306))
-    HOSXP_USER: str = str(resolve_val("HOSXP_USER", hosxp_conf.get("user"), "sa"))
+    HOSXP_USER: str = str(resolve_val("HOSXP_USER", hosxp_conf.get("user"), "sa")).strip()
     HOSXP_PASSWORD: str = str(resolve_val("HOSXP_PASSWORD", hosxp_conf.get("password"), "sa"))
-    HOSXP_DB: str = str(resolve_val("HOSXP_DB", hosxp_conf.get("database"), "hos"))
+    HOSXP_DB: str = str(resolve_val("HOSXP_DB", hosxp_conf.get("database"), "hos")).strip()
     
     DEFAULT_THRESHOLD: float = float(resolve_val("DEFAULT_THRESHOLD", ml_conf.get("default_threshold"), 0.47))
     MODELS_DIR: str = str(resolve_val("MODELS_DIR", None, "models_storage"))

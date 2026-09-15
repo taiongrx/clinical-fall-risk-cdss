@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple
 
@@ -22,9 +23,14 @@ class HOSxPAdapter(BaseHISAdapter):
         if self._engine is not None:
             return self._engine
         try:
-            db_url = (
-                f"mysql+mysqlconnector://{settings.HOSXP_USER}:{settings.HOSXP_PASSWORD}"
-                f"@{settings.HOSXP_HOST}:{settings.HOSXP_PORT}/{settings.HOSXP_DB}"
+            clean_host = settings.HOSXP_HOST.split("@")[-1].strip() if "@" in str(settings.HOSXP_HOST) else str(settings.HOSXP_HOST).strip()
+            db_url = URL.create(
+                drivername="mysql+mysqlconnector",
+                username=settings.HOSXP_USER.strip() if settings.HOSXP_USER else "sa",
+                password=settings.HOSXP_PASSWORD if settings.HOSXP_PASSWORD else "",
+                host=clean_host,
+                port=settings.HOSXP_PORT,
+                database=settings.HOSXP_DB.strip() if settings.HOSXP_DB else "hos"
             )
             self._engine = create_engine(
                 db_url,
