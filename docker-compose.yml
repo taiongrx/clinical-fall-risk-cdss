@@ -1,0 +1,101 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: fall_risk_db
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fall_risk_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - fall_risk_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fall_risk_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fall_risk_backend
+    restart: always
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgrespassword@db:5432/fall_risk_db}
+      - HOSXP_HOST=${HOSXP_HOST:-}
+      - HOSXP_PORT=${HOSXP_PORT:-3306}
+      - HOSXP_USER=${HOSXP_USER:-sa}
+      - HOSXP_PASSWORD=${HOSXP_PASSWORD:-}
+      - HOSXP_DB=${HOSXP_DB:-hos}
+      - HOSPITAL_CODE=${HOSPITAL_CODE:-10986}
+      - HOSPITAL_NAME=${HOSPITAL_NAME:-โรงพยาบาลสมเด็จพระยุพราชสายบุรี}
+      - DEFAULT_THRESHOLD=${DEFAULT_THRESHOLD:-0.47}
+      - AUTO_RETRAIN_THRESHOLD=${AUTO_RETRAIN_THRESHOLD:-50}
+      - MODELS_DIR=${MODELS_DIR:-models_storage}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend/models_storage:/app/models_storage
+      - ./secrets.toml:/app/secrets.toml
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - fall_risk_net
+
+  daemon:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fall_risk_daemon
+    restart: always
+    command: python -m app.daemon
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgrespassword@db:5432/fall_risk_db}
+      - HOSXP_HOST=${HOSXP_HOST:-}
+      - HOSXP_PORT=${HOSXP_PORT:-3306}
+      - HOSXP_USER=${HOSXP_USER:-sa}
+      - HOSXP_PASSWORD=${HOSXP_PASSWORD:-}
+      - HOSXP_DB=${HOSXP_DB:-hos}
+      - HOSPITAL_CODE=${HOSPITAL_CODE:-10986}
+      - DAEMON_POLL_INTERVAL=${DAEMON_POLL_INTERVAL:-30}
+      - DAEMON_MIN_AGE=${DAEMON_MIN_AGE:-60}
+      - MODELS_DIR=${MODELS_DIR:-models_storage}
+    volumes:
+      - ./backend/models_storage:/app/models_storage
+      - ./secrets.toml:/app/secrets.toml
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - fall_risk_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fall_risk_frontend
+    restart: always
+    ports:
+      - "${FRONTEND_PORT:-3030}:3030"
+    depends_on:
+      - backend
+    networks:
+      - fall_risk_net
+
+volumes:
+  postgres_data:
+
+networks:
+  fall_risk_net:
+    driver: bridge

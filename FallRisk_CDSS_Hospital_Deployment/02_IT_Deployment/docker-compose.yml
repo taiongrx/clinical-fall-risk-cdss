@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: fall_risk_db
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fall_risk_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-fall_risk_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  backend:
+    build:
+      context: ../03_Software_and_AI_Engine/backend
+      dockerfile: Dockerfile
+    container_name: fall_risk_backend
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ../03_Software_and_AI_Engine/models:/app/models_storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  daemon:
+    build:
+      context: ../03_Software_and_AI_Engine/backend
+      dockerfile: Dockerfile
+    container_name: fall_risk_daemon
+    restart: always
+    env_file:
+      - .env
+    command: ["python", "-m", "app.daemon"]
+    volumes:
+      - ../03_Software_and_AI_Engine/models:/app/models_storage
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  frontend:
+    image: nginx:alpine
+    container_name: fall_risk_frontend
+    restart: always
+    ports:
+      - "${FRONTEND_PORT:-3030}:80"
+    volumes:
+      - ../03_Software_and_AI_Engine/frontend_dist:/usr/share/nginx/html:ro
+    depends_on:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  pgdata:
+    driver: local

@@ -1,0 +1,65 @@
+# ================================================================
+# Fall Risk CDSS - Healthcare Production .gitignore
+# Compliant with PDPA & Zero-Data-Leakage Directive
+# ================================================================
+
+# 1. Sensitive Credentials & Secrets (CRITICAL: NEVER COMMIT)
+.env
+.env.local
+.env.production
+secrets.toml
+secret.toml
+backend/secrets.toml
+.streamlit/secrets.toml
+02_IT_Deployment/.env
+
+# 2. Civil Service Evaluation & Personal Documents (PII / PDPA)
+submission_174333/
+*.docx
+*.pdf
+*.zip
+Submission_Documents_*.zip
+FallRisk_CDSS_Hospital_Deployment_*.zip
+
+# 3. Patient Data & Datasets (De-identification / Privacy)
+*.parquet
+*.csv.gz
+*.sqlite
+*.db
+!frontend/src/**/*.csv
+!01_Clinical_Manuals/FRIDs_Reference_List.csv
+!backend/app/ml/manual_atc_mapping.csv
+
+# 4. Dependencies & Large Build Artifacts
+node_modules/
+dist/
+build/
+.next/
+*.log
+
+# 5. Python Cache & Virtual Environments
+__pycache__/
+*.py[cod]
+*.class
+.venv/
+env/
+venv/
+ENV/
+
+# 6. Docker & OS Temporary Files
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+~$*
+
+# 7. IDE & Editor Files
+.vscode/
+.idea/
+.agents/
+# Explicit Civil Service Criteria & Position 174333 documents
+*ว19*
+*ว 19*
+*174333*
+*ชำนาญการพิเศษ*
+submission*/
