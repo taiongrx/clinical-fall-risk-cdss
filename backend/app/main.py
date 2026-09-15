@@ -14,7 +14,8 @@ from .schemas import (
     RetrainRequest, RetrainResponse, ModelVersionResponse, SystemConfigUpdate,
     LoginRequest, LoginResponse, UserResponse, LoginLogResponse,
     AtcCandidate, AtcMappingAcceptRequest, TmtUpdateRequest,
-    ThresholdSimulationRequest, HospitalThresholdUpdateRequest
+    ThresholdSimulationRequest, HospitalThresholdUpdateRequest,
+    TmtAutoResolveRequest, TmtAutoResolveResponse, TmtSummaryResponse
 )
 from .hosxp import fetch_patient_data_from_hosxp, fetch_elderly_visits_by_date_range, get_latest_vstdate_in_hosxp
 from .ml.predictor import predict_patient_fall_risk
@@ -56,7 +57,7 @@ def clean_for_json(obj):
 app = FastAPI(
     title="Sai Buri Hospital - Fall Risk ML Platform",
     description="Containerized Clinical Fall Risk Prediction, Elderly Automated Screening, Continuous Learning, and Cybersecurity Auth Platform",
-    version="1.2.0"
+    version="1.3.0"
 )
 
 app.add_middleware(
@@ -1147,6 +1148,27 @@ def sync_tmt_from_his(db: Session = Depends(get_db)):
     from .ml.atc_tagger import sync_all_tmt_codes_from_his
     res = sync_all_tmt_codes_from_his(db=db)
     return res
+
+@app.post("/api/atc/auto-resolve-tmt", response_model=TmtAutoResolveResponse)
+def auto_resolve_tmt_to_atc(req: TmtAutoResolveRequest, db: Session = Depends(get_db)):
+    """
+    Version 1.3.0 Feature:
+    Extracts TMT Hierarchy (TPU -> GPU -> Substance) from HIS,
+    queries NIH NLM RxNav WHO-ATC API, classifies FRIDs,
+    and updates the local database.
+    """
+    from .ml.atc_tagger import batch_auto_resolve_hospital_tmt
+    res = batch_auto_resolve_hospital_tmt(force_remap=req.force_remap, limit=req.limit, db=db)
+    return res
+
+@app.get("/api/atc/tmt-summary", response_model=TmtSummaryResponse)
+def get_tmt_formulary_summary(db: Session = Depends(get_db)):
+    """
+    Returns TMT and ATC mapping statistics for hospital formulary.
+    """
+    from .ml.atc_tagger import get_hospital_tmt_summary
+    return get_hospital_tmt_summary(db=db)
+
 
 @app.get("/api/atc/formulary")
 def get_hospital_drug_formulary(

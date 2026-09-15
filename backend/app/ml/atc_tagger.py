@@ -501,3 +501,251 @@ def tag_drug_atc(
 
     return None, raw_group or 'NON_FRID', 'Unclassified'
 
+
+def resolve_atc_from_tmt_gpu(gpu_name: str = '', substance_name: str = '', generic_name: str = '', drug_name: str = '', session_cache: dict = None) -> tuple:
+    """
+    Resolves WHO-ATC Code and FRID group from TMT GPU and substance using RxNav API and fallback rules.
+    Returns: (atc_code, frid_group, description, source)
+    """
+    if session_cache is None:
+        session_cache = {}
+
+    candidates = []
+    if substance_name and str(substance_name).strip():
+        candidates.append(str(substance_name).strip().lower())
+    if gpu_name and str(gpu_name).strip():
+        cleaned_gpu = clean_drug_search_term(gpu_name).lower()
+        if cleaned_gpu and cleaned_gpu not in candidates:
+            candidates.append(cleaned_gpu)
+    if generic_name and str(generic_name).strip():
+        cleaned_gen = clean_drug_search_term(generic_name).lower()
+        if cleaned_gen and cleaned_gen not in candidates:
+            candidates.append(cleaned_gen)
+    if drug_name and str(drug_name).strip():
+        cleaned_drg = clean_drug_search_term(drug_name).lower()
+        if cleaned_drg and cleaned_drg not in candidates:
+            candidates.append(cleaned_drg)
+
+    for term in candidates:
+        if not term or len(term) < 2:
+            continue
+        if term in session_cache:
+            res = session_cache[term]
+            if res:
+                return res
+            continue
+
+        # Try API search
+        api_results = search_atc_from_api(term, generic_name=term)
+        if api_results:
+            best = api_results[0]
+            atc = best['atc_code']
+            grp = best.get('frid_group') or 'OTHER'
+            desc = best.get('class_name') or best.get('frid_desc') or 'WHO-ATC Classified'
+            src = best.get('source') or 'NIH RxNav (WHO-ATC)'
+            res = (atc, grp, desc, src)
+            session_cache[term] = res
+            return res
+
+        session_cache[term] = None
+
+    # Fallback to formulation regex
+    full_text = f"{substance_name} {gpu_name} {generic_name} {drug_name}".lower()
+    for pattern, atc_pfx, frid_grp, desc in ATC_REGEX_RULES:
+        if re.search(pattern, full_text, re.IGNORECASE):
+            return atc_pfx, frid_grp, desc, "Hospital Formulary Rules"
+
+    return None, None, None, None
+
+
+def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000, db = None) -> dict:
+    """
+    Automated pipeline (Version 1.3.0):
+    1. Fetches drugs with TMT hierarchy (TPU -> GPU -> Substance) from HIS adapter.
+    2. Maps unmapped drugs or all (if force_remap) using NIH RxNav API + local formulation rules.
+    3. Saves results into PostgreSQL drug_atc_mappings and memory dictionary.
+    """
+    from ..adapters.factory import get_his_adapter
+    from ..database import SessionLocal, DrugAtcMapping
+    from ..config import settings
+    from datetime import datetime
+
+    adapter = get_his_adapter()
+    df_tmt = adapter.fetch_drugs_with_tmt_hierarchy(limit=limit)
+    if df_tmt.empty:
+        return {
+            "status": "no_data",
+            "total_drugs": 0,
+            "has_tmt_count": 0,
+            "resolved_atc_count": 0,
+            "newly_mapped_count": 0,
+            "frid_mapped_count": 0,
+            "message": "ไม่พบรายการยาจากฐานข้อมูล HIS"
+        }
+
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+
+    total_drugs = len(df_tmt)
+    has_tmt_count = 0
+    resolved_atc_count = 0
+    newly_mapped_count = 0
+    frid_mapped_count = 0
+
+    session_cache = {}
+
+    try:
+        existing_records = {r.icode: r for r in db.query(DrugAtcMapping).all()}
+
+        for _, row in df_tmt.iterrows():
+            icode = str(row['icode']).strip()
+            drug_name = str(row.get('drug_name', '')).strip()
+            generic_name = str(row.get('generic_name', '')).strip()
+            did = str(row.get('did', '')).strip() if pd.notna(row.get('did')) else None
+            tpu_code = str(row.get('tpu_code', '')).strip() if pd.notna(row.get('tpu_code')) else None
+            gpu_code = str(row.get('gpu_code', '')).strip() if pd.notna(row.get('gpu_code')) else None
+            gpu_name = str(row.get('gpu_name', '')).strip() if pd.notna(row.get('gpu_name')) else ''
+            substance_name = str(row.get('substance_name', '')).strip() if pd.notna(row.get('substance_name')) else ''
+
+            if (tpu_code and tpu_code != 'None') or (gpu_code and gpu_code != 'None'):
+                has_tmt_count += 1
+
+            rec = existing_records.get(icode)
+
+            if rec and rec.atc_code and not force_remap:
+                updated = False
+                if did and rec.did != did:
+                    rec.did = did; updated = True
+                tmt_val = tpu_code if (tpu_code and tpu_code != 'None') else (gpu_code if (gpu_code and gpu_code != 'None') else None)
+                if tmt_val and not rec.tmt_code:
+                    rec.tmt_code = tmt_val; updated = True
+                if updated:
+                    rec.updated_at = datetime.utcnow()
+                resolved_atc_count += 1
+                if rec.frid_group and rec.frid_group not in ['OTHER', 'NON_FRID', 'Unclassified']:
+                    frid_mapped_count += 1
+                continue
+
+            atc, grp, desc, src = resolve_atc_from_tmt_gpu(
+                gpu_name=gpu_name,
+                substance_name=substance_name,
+                generic_name=generic_name,
+                drug_name=drug_name,
+                session_cache=session_cache
+            )
+
+            if atc:
+                resolved_atc_count += 1
+                is_frid = grp and grp not in ['OTHER', 'NON_FRID', 'Unclassified']
+                if is_frid:
+                    frid_mapped_count += 1
+
+                tmt_to_save = tpu_code if (tpu_code and tpu_code != 'None') else (gpu_code if (gpu_code and gpu_code != 'None') else (rec.tmt_code if rec else None))
+                did_to_save = did or (rec.did if rec else None)
+
+                if rec:
+                    rec.atc_code = atc
+                    rec.atc_description = desc or rec.atc_description
+                    rec.frid_group = grp or rec.frid_group
+                    rec.tmt_code = tmt_to_save
+                    rec.did = did_to_save
+                    rec.source = f"TMT_GPU_API ({src})"
+                    rec.updated_at = datetime.utcnow()
+                else:
+                    new_rec = DrugAtcMapping(
+                        icode=icode,
+                        drug_name=drug_name,
+                        generic_name=generic_name,
+                        atc_code=atc,
+                        atc_description=desc,
+                        frid_group=grp,
+                        tmt_code=tmt_to_save,
+                        did=did_to_save,
+                        hospital_code=settings.HOSPITAL_CODE,
+                        source=f"TMT_GPU_API ({src})",
+                        updated_at=datetime.utcnow()
+                    )
+                    db.add(new_rec)
+                    existing_records[icode] = new_rec
+
+                manual_dict[icode] = atc
+                newly_mapped_count += 1
+            else:
+                if rec:
+                    tmt_val = tpu_code if (tpu_code and tpu_code != 'None') else (gpu_code if (gpu_code and gpu_code != 'None') else None)
+                    if tmt_val and not rec.tmt_code:
+                        rec.tmt_code = tmt_val
+                        rec.updated_at = datetime.utcnow()
+
+        db.commit()
+        return {
+            "status": "success",
+            "total_drugs": total_drugs,
+            "has_tmt_count": has_tmt_count,
+            "resolved_atc_count": resolved_atc_count,
+            "newly_mapped_count": newly_mapped_count,
+            "frid_mapped_count": frid_mapped_count,
+            "message": f"ประมวลผล TMT/GPU สำเร็จ {total_drugs} รายการ (พบ TMT/GPU {has_tmt_count} รายการ, จับคู่ ATC ได้ {resolved_atc_count} รายการ, เป็นยาเสี่ยง FRID {frid_mapped_count} รายการ)"
+        }
+    except Exception as e:
+        db.rollback()
+        print(f"[batch_auto_resolve_hospital_tmt Error] {e}")
+        return {
+            "status": "error",
+            "total_drugs": total_drugs,
+            "has_tmt_count": has_tmt_count,
+            "resolved_atc_count": resolved_atc_count,
+            "newly_mapped_count": newly_mapped_count,
+            "frid_mapped_count": frid_mapped_count,
+            "message": f"เกิดข้อผิดพลาดในการประมวลผล TMT: {e}"
+        }
+    finally:
+        if close_db:
+            db.close()
+
+
+def get_hospital_tmt_summary(db = None) -> dict:
+    """Returns coverage summary of TMT and ATC mapping in hospital formulary."""
+    from ..database import SessionLocal, DrugAtcMapping
+    from ..adapters.factory import get_his_adapter
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        adapter = get_his_adapter()
+        df_his = adapter.fetch_hospital_formulary(limit=5000)
+        total_drugs = len(df_his)
+        has_did = int(df_his['did'].dropna().astype(str).str.strip().ne('').sum()) if 'did' in df_his.columns else 0
+        has_tmt = int((df_his['tmt_tp_code'].fillna('').ne('') | df_his['tmt_gp_code'].fillna('').ne('')).sum()) if 'tmt_tp_code' in df_his.columns else 0
+
+        mappings = db.query(DrugAtcMapping).all()
+        mapped_atc = sum(1 for m in mappings if m.atc_code and str(m.atc_code).strip() != '')
+        mapped_frid = sum(1 for m in mappings if m.frid_group and m.frid_group not in ['OTHER', 'NON_FRID', 'Unclassified'])
+        unmapped = max(0, total_drugs - mapped_atc)
+
+        return {
+            "total_drugs": total_drugs,
+            "has_tmt": has_tmt,
+            "has_did": has_did,
+            "mapped_atc": mapped_atc,
+            "mapped_frid": mapped_frid,
+            "unmapped_count": unmapped
+        }
+    except Exception as e:
+        print(f"[get_hospital_tmt_summary Error] {e}")
+        return {
+            "total_drugs": 0,
+            "has_tmt": 0,
+            "has_did": 0,
+            "mapped_atc": 0,
+            "mapped_frid": 0,
+            "unmapped_count": 0
+        }
+    finally:
+        if close_db:
+            db.close()
+
+

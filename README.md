@@ -17,6 +17,9 @@
    - ตรวจจับผู้ป่วยสูงอายุ (อายุ ≥ 60 ปี) ที่จุดคัดกรอง OPD ทันที และคำนวณคะแนนความเสี่ยงพร้อมแจ้งเตือนเคส High Risk สู่หน้าจอห้องยาและพยาบาล
 5. **Continuous MLOps Pipeline:**
    - มีระบบรับฟีดแบ็กผลการติดตามการหกล้มจริง (Ground Truth Outcomes) และสามารถ Retrain โมเดลใหม่เมื่อมีข้อมูลเคสสะสมครบตามกำหนด พร้อมระบบ Safety Gate ตรวจสอบประสิทธิภาพก่อน Hot-reload โมเดลขึ้นใช้งานจริง
+6. **Automated TMT/GPU-to-ATC Intelligence Pipeline (Version 1.3.0 New!):**
+   - ระบบแปลงรหัสยามาตรฐานไทย (TMT) ระดับ TPU $\rightarrow$ GPU $\rightarrow$ สารสำคัญบริสุทธิ์ (Active Substance) และจับคู่เข้ากับรหัสสากล WHO-ATC และกลุ่มยาเสี่ยง FRIDs อัตโนมัติผ่าน NIH NLM RxNav REST API ช่วยลดภาระการทำ Drug Mapping เมื่อขยายผลไปยังโรงพยาบาลอื่น
+
 
 ---
 

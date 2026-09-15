@@ -211,6 +211,17 @@ export const syncTmtFromHis = async () => {
   return response.data;
 };
 
+export const autoResolveTmtToAtc = async (options = {}) => {
+  const response = await api.post('/atc/auto-resolve-tmt', options);
+  return response.data;
+};
+
+export const getTmtSummary = async () => {
+  const response = await api.get('/atc/tmt-summary');
+  return response.data;
+};
+
+
 // Lift Analysis & Threshold Calibration API
 export const getLiftAnalysis = async () => {
   const response = await api.get('/analytics/lift-analysis');

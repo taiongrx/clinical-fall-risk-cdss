@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
@@ -326,3 +326,121 @@ class HOSxPAdapter(BaseHISAdapter):
         except Exception as e:
             print(f"[HOSxPAdapter] fetch_hospital_formulary failed: {e}")
             return pd.DataFrame()
+
+    def fetch_drugs_with_tmt_hierarchy(self, limit: int = 5000) -> pd.DataFrame:
+        """
+        Returns hospital drug formulary resolved with TMT Hierarchy (TPU -> GPU -> Substance).
+        Supports drugitems_tmt_tpu_list, tmt_gpu_to_tpu, tmt_gpu_code, and tmt_substance_code.
+        """
+        engine = self.get_engine()
+        if not engine:
+            return pd.DataFrame()
+
+        try:
+            with engine.connect() as conn:
+                # 1. Base drugitems
+                q_base = """
+                    SELECT icode, name as drug_name, generic_name, did,
+                           tmt_tp_code, tmt_gp_code, therapeuticgroup as raw_group
+                    FROM drugitems
+                    WHERE name IS NOT NULL AND name != ''
+                    ORDER BY name ASC
+                    LIMIT %(limit)s
+                """
+                df = pd.read_sql(q_base, conn, params={'limit': int(limit)})
+                if df.empty:
+                    return df
+
+                df['icode'] = df['icode'].astype(str).str.strip()
+                df['resolved_tpu'] = df['tmt_tp_code'].astype(str).str.strip().replace({'None': '', 'nan': ''})
+                df['resolved_gpu'] = df['tmt_gp_code'].astype(str).str.strip().replace({'None': '', 'nan': ''})
+                df['gpu_name'] = ''
+                df['substance_name'] = ''
+
+                # 2. Check and merge drugitems_tmt_tpu_list if table exists
+                try:
+                    q_tpu = """
+                        SELECT icode, tpu_code 
+                        FROM drugitems_tmt_tpu_list 
+                        WHERE active_status = 'Y' OR active_status IS NULL
+                    """
+                    df_tpu_list = pd.read_sql(q_tpu, conn)
+                    if not df_tpu_list.empty:
+                        df_tpu_list['icode'] = df_tpu_list['icode'].astype(str).str.strip()
+                        df_tpu_list['tpu_code'] = df_tpu_list['tpu_code'].astype(str).str.strip()
+                        df_tpu_list = df_tpu_list.drop_duplicates(subset=['icode'])
+                        
+                        df = df.merge(df_tpu_list, on='icode', how='left', suffixes=('', '_list'))
+                        # Prefer tpu_code from tpu_list if present
+                        df['resolved_tpu'] = df['tpu_code'].fillna('').astype(str).str.strip()
+                        # If empty, fallback to tmt_tp_code
+                        empty_mask = (df['resolved_tpu'] == '') | (df['resolved_tpu'] == 'None')
+                        df.loc[empty_mask, 'resolved_tpu'] = df.loc[empty_mask, 'tmt_tp_code'].fillna('').astype(str).str.strip()
+                except Exception as e_tpu:
+                    print(f"[HOSxPAdapter] Note: drugitems_tmt_tpu_list query skipped ({e_tpu})")
+
+                # 3. Check and merge tmt_gpu_to_tpu
+                try:
+                    q_gpu_map = "SELECT tpu_code, gpu_code FROM tmt_gpu_to_tpu"
+                    df_gpu_map = pd.read_sql(q_gpu_map, conn)
+                    if not df_gpu_map.empty:
+                        df_gpu_map['tpu_code'] = df_gpu_map['tpu_code'].astype(str).str.strip()
+                        df_gpu_map['gpu_code'] = df_gpu_map['gpu_code'].astype(str).str.strip()
+                        df_gpu_map = df_gpu_map.drop_duplicates(subset=['tpu_code'])
+
+                        df = df.merge(df_gpu_map, left_on='resolved_tpu', right_on='tpu_code', how='left', suffixes=('', '_mapped'))
+                        mapped_gpu = df['gpu_code'].fillna('').astype(str).str.strip()
+                        gpu_empty_mask = (df['resolved_gpu'] == '') | (df['resolved_gpu'] == 'None')
+                        df.loc[gpu_empty_mask, 'resolved_gpu'] = mapped_gpu.loc[gpu_empty_mask]
+                except Exception as e_gpu_map:
+                    print(f"[HOSxPAdapter] Note: tmt_gpu_to_tpu query skipped ({e_gpu_map})")
+
+                # 4. Check and merge tmt_gpu_code for GPU standard name
+                try:
+                    q_gpu_names = "SELECT gpu_code, gpu_name FROM tmt_gpu_code"
+                    df_gpu_names = pd.read_sql(q_gpu_names, conn)
+                    if not df_gpu_names.empty:
+                        df_gpu_names['gpu_code'] = df_gpu_names['gpu_code'].astype(str).str.strip()
+                        df_gpu_names = df_gpu_names.drop_duplicates(subset=['gpu_code'])
+
+                        df = df.merge(df_gpu_names, left_on='resolved_gpu', right_on='gpu_code', how='left', suffixes=('', '_named'))
+                        if 'gpu_name_named' in df.columns:
+                            df['gpu_name'] = df['gpu_name_named'].fillna('').astype(str)
+                        elif 'gpu_name' in df.columns:
+                            df['gpu_name'] = df['gpu_name'].fillna('').astype(str)
+                except Exception as e_gpu_name:
+                    print(f"[HOSxPAdapter] Note: tmt_gpu_code query skipped ({e_gpu_name})")
+
+                # 5. Check and merge Substance name if available
+                try:
+                    q_sub = """
+                        SELECT gpg.gpu_code, sc.substance_name
+                        FROM tmt_gp_to_gpu gpg
+                        JOIN tmt_vtm_to_gp vg ON gpg.gp_code = vg.gp_code
+                        JOIN tmt_sub_to_vtm sv ON vg.vtm_code = sv.vtm_code
+                        JOIN tmt_substance_code sc ON sv.substance_code = sc.substance_code
+                    """
+                    df_subs = pd.read_sql(q_sub, conn)
+                    if not df_subs.empty:
+                        df_subs['gpu_code'] = df_subs['gpu_code'].astype(str).str.strip()
+                        df_subs = df_subs.drop_duplicates(subset=['gpu_code'])
+                        df = df.merge(df_subs, left_on='resolved_gpu', right_on='gpu_code', how='left', suffixes=('', '_sub'))
+                        if 'substance_name_sub' in df.columns:
+                            df['substance_name'] = df['substance_name_sub'].fillna('').astype(str)
+                        elif 'substance_name' in df.columns:
+                            df['substance_name'] = df['substance_name'].fillna('').astype(str)
+                except Exception as e_sub:
+                    print(f"[HOSxPAdapter] Note: tmt_substance_code query skipped ({e_sub})")
+
+                # Normalize return columns
+                return df[[
+                    'icode', 'drug_name', 'generic_name', 'did',
+                    'resolved_tpu', 'resolved_gpu', 'gpu_name', 'substance_name', 'raw_group'
+                ]].rename(columns={
+                    'resolved_tpu': 'tpu_code',
+                    'resolved_gpu': 'gpu_code'
+                })
+        except Exception as e:
+            print(f"[HOSxPAdapter] fetch_drugs_with_tmt_hierarchy error: {e}")
+            return pd.DataFrame()
+

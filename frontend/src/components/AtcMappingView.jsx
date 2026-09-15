@@ -1,10 +1,10 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Pill, Search, Filter, CheckCircle2, AlertTriangle, 
   ExternalLink, RefreshCw, ChevronLeft, ChevronRight, ShieldAlert,
   ShieldCheck, Database, Sparkles, BookOpen, Edit3, ArrowDownToLine, X, Check
 } from 'lucide-react';
-import { getAtcFormulary, syncTmtFromHis, updateDrugTmt } from '../services/api';
+import { getAtcFormulary, syncTmtFromHis, updateDrugTmt, autoResolveTmtToAtc, getTmtSummary } from '../services/api';
 import AtcSearchModal from './AtcSearchModal';
 
 export default function AtcMappingView() {
@@ -12,6 +12,8 @@ export default function AtcMappingView() {
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [syncingTmt, setSyncingTmt] = useState(false);
+  const [resolvingTmt, setResolvingTmt] = useState(false);
+  const [tmtSummary, setTmtSummary] = useState(null);
   const [error, setError] = useState(null);
 
   // Filters & Search
@@ -29,6 +31,20 @@ export default function AtcMappingView() {
   const [tmtInput, setTmtInput] = useState('');
   const [didInput, setDidInput] = useState('');
   const [savingTmt, setSavingTmt] = useState(false);
+
+  const fetchTmtSummary = useCallback(async () => {
+    try {
+      const sum = await getTmtSummary();
+      setTmtSummary(sum);
+    } catch (e) {
+      console.error('Failed to fetch TMT summary:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTmtSummary();
+  }, [fetchTmtSummary]);
+
 
   const fetchFormulary = useCallback(async () => {
     setLoading(true);
@@ -81,6 +97,24 @@ export default function AtcMappingView() {
       alert('เกิดข้อผิดพลาดในการซิงค์ข้อมูล TMT จาก HIS');
     } finally {
       setSyncingTmt(false);
+    }
+  };
+
+  const handleAutoResolveTmt = async () => {
+    if (!window.confirm('คุณต้องการรันระบบอัจฉริยะแปลง TMT (TPU -> GPU) และค้นหา WHO-ATC ผ่าน NIH RxNav API อัตโนมัติใช่หรือไม่?\n\n(ระบบจะค้นหายาที่ยังไม่มี ATC และบันทึกผลลัพธ์ลงฐานข้อมูลภายใน)')) {
+      return;
+    }
+    setResolvingTmt(true);
+    try {
+      const res = await autoResolveTmtToAtc({ force_remap: false });
+      setToastMessage(res.message || 'ประมวลผล TMT สำเร็จ');
+      setTimeout(() => setToastMessage(null), 6000);
+      fetchFormulary();
+      fetchTmtSummary();
+    } catch (err) {
+      alert('เกิดข้อผิดพลาดในการประมวลผล TMT อัตโนมัติ: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setResolvingTmt(false);
     }
   };
 
@@ -171,7 +205,17 @@ export default function AtcMappingView() {
           </p>
         </div>
 
-        <div className="flex items-center space-x-2 self-end md:self-auto">
+        <div className="flex items-center space-x-2 self-end md:self-auto flex-wrap gap-y-2">
+          <button
+            onClick={handleAutoResolveTmt}
+            disabled={resolvingTmt}
+            className="px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer border border-amber-400/40 shadow-xs"
+            title="แปลง TMT เป็น GPU และจับคู่ WHO-ATC ผ่าน NIH RxNav API อัตโนมัติ (v1.3.0 Feature)"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${resolvingTmt ? 'animate-spin' : ''}`} />
+            <span>{resolvingTmt ? 'กำลังรัน TMT->ATC...' : '⚡ Auto-Map TMT/GPU API'}</span>
+          </button>
+
           <button
             onClick={handleSyncTmt}
             disabled={syncingTmt}
@@ -183,7 +227,7 @@ export default function AtcMappingView() {
           </button>
 
           <button
-            onClick={() => fetchFormulary()}
+            onClick={() => { fetchFormulary(); fetchTmtSummary(); }}
             disabled={loading}
             className="px-3.5 py-2 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer border border-indigo-500/50 shadow-xs"
           >
@@ -192,6 +236,37 @@ export default function AtcMappingView() {
           </button>
         </div>
       </div>
+
+      {/* TMT & Formulary Intelligence Summary Strip (Version 1.3.0) */}
+      {tmtSummary && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <span className="text-[11px] font-medium text-slate-500">ยาทั้งหมดใน รพ.</span>
+            <p className="text-base font-bold text-slate-800 dark:text-slate-100 mt-0.5">{tmtSummary.total_drugs} รายการ</p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <span className="text-[11px] font-medium text-indigo-500">ผูกรหัส TMT</span>
+            <p className="text-base font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">{tmtSummary.has_tmt} รายการ</p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <span className="text-[11px] font-medium text-teal-500">มี DID 24 หลัก</span>
+            <p className="text-base font-bold text-teal-600 dark:text-teal-400 mt-0.5">{tmtSummary.has_did} รายการ</p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <span className="text-[11px] font-medium text-emerald-500">จับคู่ ATC แล้ว</span>
+            <p className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{tmtSummary.mapped_atc} รายการ</p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <span className="text-[11px] font-medium text-rose-500">ยาเสี่ยงล้ม (FRIDs)</span>
+            <p className="text-base font-bold text-rose-600 dark:text-rose-400 mt-0.5">{tmtSummary.mapped_frid} รายการ</p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <span className="text-[11px] font-medium text-amber-500">ยังไม่จับคู่</span>
+            <p className="text-base font-bold text-amber-600 dark:text-amber-400 mt-0.5">{tmtSummary.unmapped_count} รายการ</p>
+          </div>
+        </div>
+      )}
+
 
       {/* Search & Filter Bar */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4">
