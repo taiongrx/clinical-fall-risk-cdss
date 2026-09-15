@@ -188,6 +188,31 @@ class MultiModelRetrainer:
             target_col = 'case_control_group'
             y = df_combined[target_col].astype(int).values
 
+            unique_classes = np.unique(y)
+            if len(unique_classes) < 2:
+                only_cls = unique_classes[0] if len(unique_classes) > 0 else 'None'
+                cls_desc = "หกล้ม (Fall=1)" if only_cls == 1 else "ไม่หกล้ม (Non-fall=0)"
+                return {
+                    'success': False,
+                    'message': (
+                        f"ไม่สามารถ Retrain ได้: ข้อมูลมีเพียงคลาสเดียวคือ '{cls_desc}' "
+                        f"การฝึกสอนโมเดลจำแนกต้องมีตัวอย่างผลลัพธ์จริงทั้ง 2 คลาส (หกล้ม และ ไม่หกล้ม) "
+                        f"และสามารถนำไฟล์ชุดข้อมูลตั้งต้น df_final_factors_preprocessed.parquet มาวางที่ backend/models_storage ได้"
+                    ),
+                    'promoted_to_active': False
+                }
+
+            counts = pd.Series(y).value_counts()
+            if (counts < 3).any():
+                return {
+                    'success': False,
+                    'message': (
+                        f"จำนวนตัวอย่างไม่เพียงพอต่อ 3-Fold Cross Validation: "
+                        f"ต้องมีข้อมูลจริงอย่างน้อยคลาสละ 3 รายการขึ้นไป (ปัจจุบัน: หกล้ม={counts.get(1, 0)}, ไม่หกล้ม={counts.get(0, 0)})"
+                    ),
+                    'promoted_to_active': False
+                }
+
             feature_cols = [
                 c for c in df_combined.columns 
                 if c.startswith('drug_group_') or c.startswith('had_prior_') or c in ['age_y', 'mobility_problems', 'polyFRIDs_gt4', 'sex']
