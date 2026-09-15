@@ -1,5 +1,6 @@
 import os
 import sys
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 # Load TOML secrets if available (Python 3.11+ built-in tomllib)
@@ -82,6 +83,18 @@ class Settings(BaseSettings):
     JWT_EXPIRATION_HOURS: int = int(resolve_val("JWT_EXPIRATION_HOURS", auth_conf.get("jwt_expiration_hours"), 8))
     MAX_LOGIN_ATTEMPTS: int = int(resolve_val("MAX_LOGIN_ATTEMPTS", auth_conf.get("max_login_attempts"), 5))
     LOCKOUT_MINUTES: int = int(resolve_val("LOCKOUT_MINUTES", auth_conf.get("lockout_minutes"), 15))
+
+    @model_validator(mode="after")
+    def validate_empty_fallbacks(self):
+        if not self.HOSXP_HOST or str(self.HOSXP_HOST).strip() == "":
+            self.HOSXP_HOST = str(hosxp_conf.get("host") or "192.168.0.251")
+        if not self.HOSXP_PASSWORD or str(self.HOSXP_PASSWORD).strip() == "":
+            self.HOSXP_PASSWORD = str(hosxp_conf.get("password") or "sa")
+        if not self.HOSXP_USER or str(self.HOSXP_USER).strip() == "":
+            self.HOSXP_USER = str(hosxp_conf.get("user") or "sa")
+        if not self.HOSXP_DB or str(self.HOSXP_DB).strip() == "":
+            self.HOSXP_DB = str(hosxp_conf.get("database") or "hos")
+        return self
 
     class Config:
         case_sensitive = True
