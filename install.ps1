@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # ================================================================
 # install.ps1 — Fall Risk Platform Installer (Production)
 # รองรับ: Windows Server 2019/2022, Windows 10/11 (64-bit)
@@ -14,12 +14,13 @@ param(
     [string]$HosxpPassword = "",
     [string]$HosxpDb       = "hos",
     [string]$HospitalCode  = "10986",
-    [string]$HospitalName  = "โรงพยาบาลสมเด็จพระยุพราชสายบุรี",
+    [string]$HospitalName  = "Sai Buri Crown Prince Hospital",
     [string]$FrontendPort  = "3030",
     [string]$BackendPort   = "8000",
     [string]$DbPassword    = ""
 )
 
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
 $ProjectDir = $PSScriptRoot
 
@@ -67,7 +68,7 @@ $defaultHcode = if ($HospitalCode) { $HospitalCode } else { "10986" }
 $inputHcode = Read-Host "  Hospital Code 5 หลัก [Enter เพื่อใช้: $defaultHcode]"
 if ($inputHcode) { $HospitalCode = $inputHcode } else { $HospitalCode = $defaultHcode }
 
-$defaultHname = if ($HospitalName) { $HospitalName } else { "โรงพยาบาลสมเด็จพระยุพราชสายบุรี" }
+$defaultHname = if ($HospitalName) { $HospitalName } else { "Sai Buri Crown Prince Hospital" }
 $inputHname = Read-Host "  ชื่อโรงพยาบาล [Enter เพื่อใช้: $defaultHname]"
 if ($inputHname) { $HospitalName = $inputHname } else { $HospitalName = $defaultHname }
 
