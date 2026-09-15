@@ -94,6 +94,8 @@ class Settings(BaseSettings):
             self.HOSXP_USER = str(hosxp_conf.get("user") or "sa")
         if not self.HOSXP_DB or str(self.HOSXP_DB).strip() == "":
             self.HOSXP_DB = str(hosxp_conf.get("database") or "hos")
+        if not self.JWT_SECRET_KEY or str(self.JWT_SECRET_KEY).strip() == "":
+            self.JWT_SECRET_KEY = str(auth_conf.get("jwt_secret_key") or "saiburi-hospital-fallrisk-super-secret-key-2026-secure-jwt")
         return self
 
     class Config:
