@@ -219,13 +219,13 @@ export default function MLOpsView({ onModelUpdated }) {
                 onChange={(e) => setTrainingWindowYears(Number(e.target.value))}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 outline-none focus:border-sky-500"
               >
-                <option value="3">⭐ 3 ปีล่าสุด (2022–2024) [แนะนำ - ตัดข้อมูลเก่า AUC สูงสุด 85.9%]</option>
-                <option value="5">5 ปีล่าสุด (2020–2024) [AUC ~80.1%, N=2,361]</option>
-                <option value="7">7 ปีล่าสุด (2018–2024) [AUC ~74.8%, N=5,883]</option>
-                <option value="10">10 ปีทั้งหมด (2015–2024) [N=10,188 เคส]</option>
+                <option value="3">⭐ 3 ปีล่าสุด (แนะนำ - ลดผลกระทบจาก Concept Drift และการเปลี่ยนสูตรยา)</option>
+                <option value="5">5 ปีล่าสุด (สมดุลระหว่างขนาดตัวอย่างกับความทันสมัยของบริบทคลินิก)</option>
+                <option value="7">7 ปีล่าสุด (เพิ่มขนาดตัวอย่างสำหรับการเรียนรู้ของโมเดล)</option>
+                <option value="10">ข้อมูลทั้งหมดที่มีในระบบ (Full Historical Cohort)</option>
               </select>
               <p className="text-[11px] text-slate-500 mt-1">
-                การลด N เหลือ 3–5 ปีล่าสุด ช่วยตัดบริบทการใช้ชีวิต/ยาในอดีตที่ล้าสมัยออก ทำให้โมเดลจับแบบแผนปัจจุบันได้แม่นยำขึ้นมาก
+                เทคนิค Temporal Windowing ช่วยลดปัญหา Concept Drift จากแนวทางการรักษาและรายการยาในอดีตที่เปลี่ยนแปลงไป โดยโมเดลจะเรียนรู้จากแบบแผนประชากรของผู้ป่วยในช่วงเวลาล่าสุด
               </p>
             </div>
 
