@@ -150,3 +150,12 @@ docker logs --tail 50 -f fall_risk_daemon
 ## 📜 ความปลอดภัยและการปฏิบัติตามกฎหมาย (PDPA Compliance)
 * โครงการนี้ปฏิเสธการจัดเก็บข้อมูลอ่อนไหวพิเศษที่ไม่จำเป็น และไม่ส่งข้อมูลออกภายนอกโรงพยาบาล
 * ห้าม Commit ไฟล์ `.env` หรือ `secrets.toml` ที่มี Credentials จริงเข้าสู่ Version Control เด็ดขาด (มี `.gitignore` ดักไว้แล้ว)
+
+---
+
+## 📚 เอกสารกำกับมาตรฐาน HAIT บทที่ 6 (Hospital Accreditation - IT Standards)
+* **[แผนบริหารความต่อเนื่องและกู้คืนระบบ (IT-BCP & DRP)](docs/HAIT_CH6_BCP_DRP_PLAN.md):** แผนกู้คืนระบบจากภัยพิบัติ กำหนดค่า RTO $\le 30$ นาที, RPO $\le 12$ ชั่วโมง, ขั้นตอนปฏิบัติการคลินิกสำรอง (Downtime Procedures) และการซ้อมแผนประจำปี
+* **[ข้อกำหนดความต้องการของผู้ใช้งาน (URS)](docs/HAIT_CH6_USER_REQUIREMENTS_SPECIFICATION.md):** ข้อกำหนดความต้องการเชิงหน้าที่และไม่ใช่เชิงหน้าที่ (FR/NFR), การจำแนกสิทธิ์ตามบทบาท (RBAC) และเกณฑ์การตรวจรับระบบ (User Acceptance Criteria)
+* **[นโยบายการควบคุมเวอร์ชันและการบริหารการเปลี่ยนแปลง](docs/HAIT_CH6_VERSION_CONTROL_CHANGE_MANAGEMENT.md):** มาตรฐาน Semantic Versioning (SemVer 2.0), Git Flow, กระบวนการอนุมัติการเปลี่ยนแปลง 6 ขั้นตอน (CAB) และบันทึกประวัติการเปลี่ยนแปลงทางการ (Changelog v1.0.0 – v1.3.0)
+* **คู่มือประกอบการใช้งานอื่นๆ:** [INSTALL.md](INSTALL.md) · [คู่มือผู้ดูแลระบบ](docs/ADMIN_GUIDE_TH.md) · [คู่มือผู้ใช้งานคลินิก](docs/USER_MANUAL_TH.md) · [คู่มือการ Deploy รพ. อื่น](docs/DEPLOYMENT_GUIDE.md)
+
