@@ -28,8 +28,8 @@ ATC_REGEX_RULES = [
     (r'\b(tramadol|morphine|fentanyl|pethidine|codeine|methadone|oxycodone|buprenorphine|hydromorphone|pethidine)\b', 'N02A', 'NARCOTICs', 'Opioids & Narcotics'),
     # 6. NSAIDs (M01A)
     (r'\b(ibuprofen|naproxen|diclofenac|celecoxib|etoricoxib|mefenamic|meloxicam|piroxicam|indomethacin|ketorolac|nabumetone|sulindac|aspirin 300|aspirin 500)\b', 'M01A', 'NSAIDs', 'Anti-inflammatory and Antirheumatic Products (NSAIDs)'),
-    # 7. Antihistamines (R06A)
-    (r'\b(chlorpheniramine|cpm|hydroxyzine|diphenhydramine|dimenhydrinate|cetirizine|loratadine|fexofenadine|levocetirizine|desloratadine|cyproheptadine)\b', 'R06A', 'ANTIHISTAMINE', 'Antihistamines for Systemic Use'),
+    # 7. Antihistamines (1st Generation Sedating only per AGS Beers 2023 / STOPPFall 2021)
+    (r'\b(chlorpheniramine|cpm|hydroxyzine|diphenhydramine|dimenhydrinate|cyproheptadine|brompheniramine|dexchlorpheniramine|triprolidine|carbinoxamine|clemastine|promethazine)\b', 'R06AB', 'ANTIHISTAMINE', 'First-generation Sedating Antihistamines'),
     # 8. Diuretics (C03)
     (r'\b(furosemide|spironolactone|hydrochlorothiazide|hctz|indapamide|amiloride|acetazolamide|mannitol|torasemide)\b', 'C03', 'DIURETICS', 'Diuretics'),
     # 9. Alpha-1 Adrenergic Antagonists (G04CA, C02CA)
@@ -44,6 +44,8 @@ ATC_REGEX_RULES = [
 ]
 
 # ATC Prefix to FRID Group Mapping
+# Note: R06 is restricted to 1st-generation sedating antihistamines (R06AA, R06AB, R06AD, R06AX02)
+# 2nd-generation antihistamines (R06AE cetirizine, R06AX13 loratadine, R06AX26 fexofenadine, etc.) are NOT FRIDs.
 ATC_PREFIX_TO_FRID = {
     'N05B': ('sedative / hypnotics', 'Sedatives & Anxiolytics'),
     'N05C': ('sedative / hypnotics', 'Hypnotics & Sedatives'),
@@ -52,7 +54,10 @@ ATC_PREFIX_TO_FRID = {
     'N03A': ('ANTIEPILEPTIC', 'Antiepileptics'),
     'N02A': ('NARCOTICs', 'Opioids'),
     'M01A': ('NSAIDs', 'NSAIDs'),
-    'R06A': ('ANTIHISTAMINE', 'Antihistamines'),
+    'R06AA': ('ANTIHISTAMINE', '1st-gen Antihistamines (Aminoalkyl ethers)'),
+    'R06AB': ('ANTIHISTAMINE', '1st-gen Antihistamines (Substituted alkylamines)'),
+    'R06AD': ('ANTIHISTAMINE', '1st-gen Antihistamines (Phenothiazine derivatives)'),
+    'R06AX02': ('ANTIHISTAMINE', '1st-gen Antihistamines (Cyproheptadine)'),
     'C03':  ('DIURETICS', 'Diuretics'),
     'G04CA':('Alpha-1 adrenergic antagonist', 'Alpha-1 Blockers'),
     'C02CA':('Alpha-1 adrenergic antagonist', 'Alpha-1 Blockers'),
@@ -493,7 +498,11 @@ def tag_drug_atc(
         elif 'NSAID' in rg_upper:
             return 'M01A', 'NSAIDs', 'NSAIDs'
         elif 'HISTAMINE' in rg_upper:
-            return 'R06A', 'ANTIHISTAMINE', 'Antihistamines'
+            # Per AGS Beers 2023: Only 1st generation / sedating antihistamines are FRIDs
+            if any(term in rg_upper for term in ['1ST', 'FIRST', 'SEDAT', 'CPM', 'CHLORPHEN']):
+                return 'R06AB', 'ANTIHISTAMINE', 'First-generation Sedating Antihistamines'
+            else:
+                return 'R06A', 'NON_FRID', 'Non-sedating Antihistamines (Non-FRID)'
         elif 'DIURETIC' in rg_upper:
             return 'C03', 'DIURETICS', 'Diuretics'
         elif 'BETA' in rg_upper:
