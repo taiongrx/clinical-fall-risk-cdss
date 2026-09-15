@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 # ================================================================
 # install.ps1 — Fall Risk Platform Installer (Production)
 # รองรับ: Windows Server 2019/2022, Windows 10/11 (64-bit)
@@ -41,18 +41,46 @@ catch { Write-Fail "Docker daemon not running. Start Docker Desktop." }
 
 # STEP 2: Collect Configuration
 Write-Step "Collecting Configuration..."
-if (-not $HosxpHost) { $HosxpHost = Read-Host "  HOSxP MySQL Host IP (เช่น 192.168.0.251)" }
+if (-not $HosxpHost) { 
+    $HosxpHost = Read-Host "  HOSxP MySQL Host IP (เช่น 192.168.0.251)" 
+}
+
+$defaultPort = if ($HosxpPort) { $HosxpPort } else { "3306" }
+$inputPort = Read-Host "  HOSxP MySQL Port [Enter เพื่อใช้: $defaultPort]"
+if ($inputPort) { $HosxpPort = $inputPort } else { $HosxpPort = $defaultPort }
+
+$defaultUser = if ($HosxpUser) { $HosxpUser } else { "sa" }
+$inputUser = Read-Host "  HOSxP MySQL User [Enter เพื่อใช้: $defaultUser]"
+if ($inputUser) { $HosxpUser = $inputUser } else { $HosxpUser = $defaultUser }
+
 if (-not $HosxpPassword) {
-    $sec = Read-Host "  HOSxP Password" -AsSecureString
+    $sec = Read-Host "  HOSxP MySQL Password for '$HosxpUser'" -AsSecureString
     $HosxpPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
 }
+
+$defaultDb = if ($HosxpDb) { $HosxpDb } else { "hos" }
+$inputDb = Read-Host "  HOSxP Database Name [Enter เพื่อใช้: $defaultDb]"
+if ($inputDb) { $HosxpDb = $inputDb } else { $HosxpDb = $defaultDb }
+
+$defaultHcode = if ($HospitalCode) { $HospitalCode } else { "10986" }
+$inputHcode = Read-Host "  Hospital Code 5 หลัก [Enter เพื่อใช้: $defaultHcode]"
+if ($inputHcode) { $HospitalCode = $inputHcode } else { $HospitalCode = $defaultHcode }
+
+$defaultHname = if ($HospitalName) { $HospitalName } else { "โรงพยาบาลสมเด็จพระยุพราชสายบุรี" }
+$inputHname = Read-Host "  ชื่อโรงพยาบาล [Enter เพื่อใช้: $defaultHname]"
+if ($inputHname) { $HospitalName = $inputHname } else { $HospitalName = $defaultHname }
+
 if (-not $DbPassword) {
-    $DbPassword = -join ((65..90)+(97..122)+(48..57) | Get-Random -Count 24 | % {[char]$_})
+    $DbPassword = -join ((65..90)+(97..122)+(48..57) | Get-Random -Count 24 | ForEach-Object {[char]$_})
     Write-Warn "PostgreSQL password auto-generated — SAVE THIS: $DbPassword"
 }
-$JwtSecret = [System.Convert]::ToHexString(
-    [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLower()
+
+# Cryptographically secure 32-byte JWT secret compatible with Windows PowerShell 5.1 & PS 7+
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$bytes = New-Object byte[] 32
+$rng.GetBytes($bytes)
+$JwtSecret = -join ($bytes | ForEach-Object { $_.ToString("x2") })
 Write-OK "JWT secret generated"
 
 # STEP 3: Write .env (Primary for Docker Compose)
