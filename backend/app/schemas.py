@@ -185,12 +185,28 @@ class TmtAutoResolveRequest(BaseModel):
 
 class TmtAutoResolveResponse(BaseModel):
     status: str
-    total_drugs: int
-    has_tmt_count: int
-    resolved_atc_count: int
-    newly_mapped_count: int
-    frid_mapped_count: int
+    total_drugs: int = 0
+    has_tmt_count: int = 0
+    resolved_atc_count: int = 0
+    newly_mapped_count: int = 0
+    frid_mapped_count: int = 0
     message: str
+
+class TmtResolveProgressResponse(BaseModel):
+    is_running: bool
+    status: str
+    current_index: int = 0
+    total: int = 0
+    percent: float = 0.0
+    current_drug: str = ""
+    has_tmt_count: int = 0
+    resolved_atc_count: int = 0
+    newly_mapped_count: int = 0
+    frid_mapped_count: int = 0
+    message: str = ""
+    error: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
 
 class TmtSummaryResponse(BaseModel):
     total_drugs: int

@@ -371,13 +371,17 @@ def search_atc_from_api(query: str, generic_name: str = '') -> list:
             clean_terms.append(t.lower())
 
     # 1. Query NIH NLM RxNav API
-    for term in clean_terms[:3]:
+    for term in clean_terms[:2]:
+        # Fast guard: RxNav only indexes English characters, skip non-ascii (Thai)
+        if any(ord(c) > 127 for c in term):
+            continue
+
         encoded = urllib.parse.quote(term)
         # 1a. Try byDrugName
         try:
             url_by_name = f"https://rxnav.nlm.nih.gov/REST/rxclass/class/byDrugName.json?drugName={encoded}&relaSource=ATC"
             req = urllib.request.Request(url_by_name, headers={'User-Agent': 'SaiBuri-FallRisk-CDS/1.0'})
-            with urllib.request.urlopen(req, timeout=4) as resp:
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
                 data = json.loads(resp.read().decode())
                 info_list = data.get('rxclassDrugInfoList', {}).get('rxclassDrugInfo', [])
                 for info in info_list:
@@ -391,18 +395,17 @@ def search_atc_from_api(query: str, generic_name: str = '') -> list:
         # 1b. Try approximateTerm to resolve brand to generic RxCUI
         if len(results) < 2:
             try:
-                url_approx = f"https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term={encoded}&maxEntries=3"
+                url_approx = f"https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term={encoded}&maxEntries=2"
                 req = urllib.request.Request(url_approx, headers={'User-Agent': 'SaiBuri-FallRisk-CDS/1.0'})
-                with urllib.request.urlopen(req, timeout=4) as resp:
+                with urllib.request.urlopen(req, timeout=2.0) as resp:
                     data = json.loads(resp.read().decode())
                     candidates = data.get('approximateGroup', {}).get('candidate', [])
                     for cand in candidates:
-                        # If candidate has direct ATC source
                         if cand.get('source') == 'ATC' and cand.get('rxcui'):
                             rxcui = cand.get('rxcui')
                             c_url = f"https://rxnav.nlm.nih.gov/REST/rxclass/class/byRxcui.json?rxcui={rxcui}&relaSource=ATC"
                             req_c = urllib.request.Request(c_url, headers={'User-Agent': 'SaiBuri-FallRisk-CDS/1.0'})
-                            with urllib.request.urlopen(req_c, timeout=3) as c_resp:
+                            with urllib.request.urlopen(req_c, timeout=2.0) as c_resp:
                                 c_data = json.loads(c_resp.read().decode())
                                 for c_info in c_data.get('rxclassDrugInfoList', {}).get('rxclassDrugInfo', []):
                                     c_item = c_info.get('rxclassMinConceptItem', {})
@@ -410,8 +413,9 @@ def search_atc_from_api(query: str, generic_name: str = '') -> list:
             except Exception:
                 pass
 
-        if len(results) >= 5:
+        if len(results) >= 3:
             break
+
 
     # 2. Local Formulary & Regex Rules Fallback
     full_text = f"{query} {generic_name}".lower()
@@ -558,22 +562,80 @@ def resolve_atc_from_tmt_gpu(gpu_name: str = '', substance_name: str = '', gener
     return None, None, None, None
 
 
+TMT_RESOLVE_PROGRESS = {
+    "is_running": False,
+    "status": "idle",
+    "current_index": 0,
+    "total": 0,
+    "percent": 0.0,
+    "current_drug": "",
+    "has_tmt_count": 0,
+    "resolved_atc_count": 0,
+    "newly_mapped_count": 0,
+    "frid_mapped_count": 0,
+    "message": "พร้อมสำหรับการประมวลผล",
+    "error": None,
+    "started_at": None,
+    "completed_at": None
+}
+
+def get_auto_resolve_progress() -> dict:
+    """Returns a snapshot of the current auto-resolve progress."""
+    global TMT_RESOLVE_PROGRESS
+    return dict(TMT_RESOLVE_PROGRESS)
+
+def run_batch_auto_resolve_task(force_remap: bool = False, limit: int = 5000):
+    """
+    Safely executes batch_auto_resolve_hospital_tmt in a background thread.
+    Manages dedicated SQLAlchemy session from pool and guarantees closure.
+    """
+    global TMT_RESOLVE_PROGRESS
+    if TMT_RESOLVE_PROGRESS.get("is_running"):
+        return {"status": "already_running", "message": "งานกำลังประมวลผลอยู่แล้ว"}
+
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        return batch_auto_resolve_hospital_tmt(force_remap=force_remap, limit=limit, db=db)
+    finally:
+        db.close()
+
+
 def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000, db = None) -> dict:
     """
     Automated pipeline (Version 1.3.0):
     1. Fetches drugs with TMT hierarchy (TPU -> GPU -> Substance) from HIS adapter.
     2. Maps unmapped drugs or all (if force_remap) using NIH RxNav API + local formulation rules.
     3. Saves results into PostgreSQL drug_atc_mappings and memory dictionary.
+    4. Continuously updates TMT_RESOLVE_PROGRESS for real-time frontend monitoring.
     """
+    global TMT_RESOLVE_PROGRESS
     from ..adapters.factory import get_his_adapter
     from ..database import SessionLocal, DrugAtcMapping
     from ..config import settings
     from datetime import datetime
 
+    TMT_RESOLVE_PROGRESS.update({
+        "is_running": True,
+        "status": "running",
+        "current_index": 0,
+        "total": 0,
+        "percent": 0.0,
+        "current_drug": "กำลังโหลดข้อมูลบัญชียาจาก HIS...",
+        "has_tmt_count": 0,
+        "resolved_atc_count": 0,
+        "newly_mapped_count": 0,
+        "frid_mapped_count": 0,
+        "message": "กำลังโหลดข้อมูลบัญชียาจาก HIS...",
+        "error": None,
+        "started_at": datetime.utcnow().isoformat(),
+        "completed_at": None
+    })
+
     adapter = get_his_adapter()
     df_tmt = adapter.fetch_drugs_with_tmt_hierarchy(limit=limit)
     if df_tmt.empty:
-        return {
+        res = {
             "status": "no_data",
             "total_drugs": 0,
             "has_tmt_count": 0,
@@ -582,6 +644,14 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
             "frid_mapped_count": 0,
             "message": "ไม่พบรายการยาจากฐานข้อมูล HIS"
         }
+        TMT_RESOLVE_PROGRESS.update({
+            "is_running": False,
+            "status": "completed",
+            "percent": 100.0,
+            "message": "ไม่พบรายการยาจากฐานข้อมูล HIS",
+            "completed_at": datetime.utcnow().isoformat()
+        })
+        return res
 
     close_db = False
     if db is None:
@@ -594,12 +664,18 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
     newly_mapped_count = 0
     frid_mapped_count = 0
 
+    TMT_RESOLVE_PROGRESS.update({
+        "total": total_drugs,
+        "message": f"เริ่มวิเคราะห์รายการยา {total_drugs} รายการ..."
+    })
+
     session_cache = {}
 
     try:
         existing_records = {r.icode: r for r in db.query(DrugAtcMapping).all()}
 
-        for _, row in df_tmt.iterrows():
+        for idx, (_, row) in enumerate(df_tmt.iterrows()):
+            curr_idx = idx + 1
             icode = str(row['icode']).strip()
             drug_name = str(row.get('drug_name', '')).strip()
             generic_name = str(row.get('generic_name', '')).strip()
@@ -609,8 +685,20 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
             gpu_name = str(row.get('gpu_name', '')).strip() if pd.notna(row.get('gpu_name')) else ''
             substance_name = str(row.get('substance_name', '')).strip() if pd.notna(row.get('substance_name')) else ''
 
+            # Update live progress
+            disp_drug = drug_name
+            if generic_name:
+                disp_drug += f" ({generic_name})"
+            elif gpu_name:
+                disp_drug += f" [{gpu_name}]"
+
+            TMT_RESOLVE_PROGRESS["current_index"] = curr_idx
+            TMT_RESOLVE_PROGRESS["percent"] = round((curr_idx / total_drugs) * 100, 1)
+            TMT_RESOLVE_PROGRESS["current_drug"] = disp_drug[:90]
+
             if (tpu_code and tpu_code != 'None') or (gpu_code and gpu_code != 'None'):
                 has_tmt_count += 1
+                TMT_RESOLVE_PROGRESS["has_tmt_count"] = has_tmt_count
 
             rec = existing_records.get(icode)
 
@@ -624,8 +712,10 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
                 if updated:
                     rec.updated_at = datetime.utcnow()
                 resolved_atc_count += 1
+                TMT_RESOLVE_PROGRESS["resolved_atc_count"] = resolved_atc_count
                 if rec.frid_group and rec.frid_group not in ['OTHER', 'NON_FRID', 'Unclassified']:
                     frid_mapped_count += 1
+                    TMT_RESOLVE_PROGRESS["frid_mapped_count"] = frid_mapped_count
                 continue
 
             atc, grp, desc, src = resolve_atc_from_tmt_gpu(
@@ -638,9 +728,11 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
 
             if atc:
                 resolved_atc_count += 1
+                TMT_RESOLVE_PROGRESS["resolved_atc_count"] = resolved_atc_count
                 is_frid = grp and grp not in ['OTHER', 'NON_FRID', 'Unclassified']
                 if is_frid:
                     frid_mapped_count += 1
+                    TMT_RESOLVE_PROGRESS["frid_mapped_count"] = frid_mapped_count
 
                 tmt_to_save = tpu_code if (tpu_code and tpu_code != 'None') else (gpu_code if (gpu_code and gpu_code != 'None') else (rec.tmt_code if rec else None))
                 did_to_save = did or (rec.did if rec else None)
@@ -672,6 +764,7 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
 
                 manual_dict[icode] = atc
                 newly_mapped_count += 1
+                TMT_RESOLVE_PROGRESS["newly_mapped_count"] = newly_mapped_count
             else:
                 if rec:
                     tmt_val = tpu_code if (tpu_code and tpu_code != 'None') else (gpu_code if (gpu_code and gpu_code != 'None') else None)
@@ -680,6 +773,14 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
                         rec.updated_at = datetime.utcnow()
 
         db.commit()
+        success_msg = f"ประมวลผล TMT/GPU สำเร็จ {total_drugs} รายการ (พบ TMT/GPU {has_tmt_count} รายการ, จับคู่ ATC ได้ {resolved_atc_count} รายการ, เป็นยาเสี่ยง FRID {frid_mapped_count} รายการ)"
+        TMT_RESOLVE_PROGRESS.update({
+            "is_running": False,
+            "status": "completed",
+            "percent": 100.0,
+            "message": success_msg,
+            "completed_at": datetime.utcnow().isoformat()
+        })
         return {
             "status": "success",
             "total_drugs": total_drugs,
@@ -687,11 +788,19 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
             "resolved_atc_count": resolved_atc_count,
             "newly_mapped_count": newly_mapped_count,
             "frid_mapped_count": frid_mapped_count,
-            "message": f"ประมวลผล TMT/GPU สำเร็จ {total_drugs} รายการ (พบ TMT/GPU {has_tmt_count} รายการ, จับคู่ ATC ได้ {resolved_atc_count} รายการ, เป็นยาเสี่ยง FRID {frid_mapped_count} รายการ)"
+            "message": success_msg
         }
     except Exception as e:
         db.rollback()
+        err_msg = f"เกิดข้อผิดพลาดในการประมวลผล TMT: {e}"
         print(f"[batch_auto_resolve_hospital_tmt Error] {e}")
+        TMT_RESOLVE_PROGRESS.update({
+            "is_running": False,
+            "status": "error",
+            "error": str(e),
+            "message": err_msg,
+            "completed_at": datetime.utcnow().isoformat()
+        })
         return {
             "status": "error",
             "total_drugs": total_drugs,
@@ -699,7 +808,7 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
             "resolved_atc_count": resolved_atc_count,
             "newly_mapped_count": newly_mapped_count,
             "frid_mapped_count": frid_mapped_count,
-            "message": f"เกิดข้อผิดพลาดในการประมวลผล TMT: {e}"
+            "message": err_msg
         }
     finally:
         if close_db:

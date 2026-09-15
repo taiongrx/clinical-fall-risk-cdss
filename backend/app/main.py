@@ -15,7 +15,8 @@ from .schemas import (
     LoginRequest, LoginResponse, UserResponse, LoginLogResponse,
     AtcCandidate, AtcMappingAcceptRequest, TmtUpdateRequest,
     ThresholdSimulationRequest, HospitalThresholdUpdateRequest,
-    TmtAutoResolveRequest, TmtAutoResolveResponse, TmtSummaryResponse
+    TmtAutoResolveRequest, TmtAutoResolveResponse, TmtSummaryResponse,
+    TmtResolveProgressResponse
 )
 from .hosxp import fetch_patient_data_from_hosxp, fetch_elderly_visits_by_date_range, get_latest_vstdate_in_hosxp
 from .ml.predictor import predict_patient_fall_risk
@@ -1150,16 +1151,47 @@ def sync_tmt_from_his(db: Session = Depends(get_db)):
     return res
 
 @app.post("/api/atc/auto-resolve-tmt", response_model=TmtAutoResolveResponse)
-def auto_resolve_tmt_to_atc(req: TmtAutoResolveRequest, db: Session = Depends(get_db)):
+def auto_resolve_tmt_to_atc(
+    req: TmtAutoResolveRequest,
+    background_tasks: BackgroundTasks
+):
     """
     Version 1.3.0 Feature:
     Extracts TMT Hierarchy (TPU -> GPU -> Substance) from HIS,
     queries NIH NLM RxNav WHO-ATC API, classifies FRIDs,
-    and updates the local database.
+    and updates the local database in a resilient background task.
     """
-    from .ml.atc_tagger import batch_auto_resolve_hospital_tmt
-    res = batch_auto_resolve_hospital_tmt(force_remap=req.force_remap, limit=req.limit, db=db)
-    return res
+    from .ml.atc_tagger import run_batch_auto_resolve_task, get_auto_resolve_progress
+    prog = get_auto_resolve_progress()
+    if prog.get("is_running"):
+        return TmtAutoResolveResponse(
+            status="already_running",
+            total_drugs=prog.get("total", 0),
+            has_tmt_count=prog.get("has_tmt_count", 0),
+            resolved_atc_count=prog.get("resolved_atc_count", 0),
+            newly_mapped_count=prog.get("newly_mapped_count", 0),
+            frid_mapped_count=prog.get("frid_mapped_count", 0),
+            message="ระบบกำลังประมวลผลการแปลง TMT อยู่แล้วในพื้นหลัง"
+        )
+
+    background_tasks.add_task(run_batch_auto_resolve_task, force_remap=req.force_remap, limit=req.limit)
+    return TmtAutoResolveResponse(
+        status="started",
+        total_drugs=0,
+        has_tmt_count=0,
+        resolved_atc_count=0,
+        newly_mapped_count=0,
+        frid_mapped_count=0,
+        message="เริ่มกระบวนการแปลง TMT (TPU -> GPU) และค้นหา WHO-ATC ในพื้นหลังเรียบร้อยแล้ว"
+    )
+
+@app.get("/api/atc/auto-resolve-progress", response_model=TmtResolveProgressResponse)
+def get_auto_resolve_tmt_progress():
+    """
+    Returns live real-time progress of TMT-ATC auto-resolution background task.
+    """
+    from .ml.atc_tagger import get_auto_resolve_progress
+    return get_auto_resolve_progress()
 
 @app.get("/api/atc/tmt-summary", response_model=TmtSummaryResponse)
 def get_tmt_formulary_summary(db: Session = Depends(get_db)):

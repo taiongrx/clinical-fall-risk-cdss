@@ -216,6 +216,11 @@ export const autoResolveTmtToAtc = async (options = {}) => {
   return response.data;
 };
 
+export const getAutoResolveProgress = async () => {
+  const response = await api.get('/atc/auto-resolve-progress');
+  return response.data;
+};
+
 export const getTmtSummary = async () => {
   const response = await api.get('/atc/tmt-summary');
   return response.data;

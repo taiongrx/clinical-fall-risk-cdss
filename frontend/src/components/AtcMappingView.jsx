@@ -2,9 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Pill, Search, Filter, CheckCircle2, AlertTriangle, 
   ExternalLink, RefreshCw, ChevronLeft, ChevronRight, ShieldAlert,
-  ShieldCheck, Database, Sparkles, BookOpen, Edit3, ArrowDownToLine, X, Check
+  ShieldCheck, Database, Sparkles, BookOpen, Edit3, ArrowDownToLine, X, Check,
+  Activity
 } from 'lucide-react';
-import { getAtcFormulary, syncTmtFromHis, updateDrugTmt, autoResolveTmtToAtc, getTmtSummary } from '../services/api';
+import { 
+  getAtcFormulary, syncTmtFromHis, updateDrugTmt, 
+  autoResolveTmtToAtc, getAutoResolveProgress, getTmtSummary 
+} from '../services/api';
 import AtcSearchModal from './AtcSearchModal';
 
 export default function AtcMappingView() {
@@ -13,6 +17,8 @@ export default function AtcMappingView() {
   const [loading, setLoading] = useState(false);
   const [syncingTmt, setSyncingTmt] = useState(false);
   const [resolvingTmt, setResolvingTmt] = useState(false);
+  const [taskProgress, setTaskProgress] = useState(null);
+  const [showProgressModal, setShowProgressModal] = useState(false);
   const [tmtSummary, setTmtSummary] = useState(null);
   const [error, setError] = useState(null);
 
@@ -45,7 +51,6 @@ export default function AtcMappingView() {
     fetchTmtSummary();
   }, [fetchTmtSummary]);
 
-
   const fetchFormulary = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -69,6 +74,42 @@ export default function AtcMappingView() {
   useEffect(() => {
     fetchFormulary();
   }, [fetchFormulary]);
+
+  // Live polling for background Auto-Resolve TMT
+  useEffect(() => {
+    let intervalId = null;
+
+    const checkProgress = async () => {
+      try {
+        const prog = await getAutoResolveProgress();
+        setTaskProgress(prog);
+
+        if (prog && prog.is_running) {
+          setResolvingTmt(true);
+        } else if (prog && !prog.is_running && resolvingTmt) {
+          setResolvingTmt(false);
+          if (prog.status === 'completed') {
+            setToastMessage(prog.message || 'ประมวลผล TMT สำเร็จเรียบร้อย');
+            setTimeout(() => setToastMessage(null), 6000);
+            fetchFormulary();
+            fetchTmtSummary();
+          }
+        }
+      } catch (e) {
+        console.error('Failed to poll auto-resolve progress:', e);
+      }
+    };
+
+    checkProgress();
+
+    if (resolvingTmt || showProgressModal) {
+      intervalId = setInterval(checkProgress, 1200);
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [resolvingTmt, showProgressModal, fetchFormulary, fetchTmtSummary]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -101,19 +142,19 @@ export default function AtcMappingView() {
   };
 
   const handleAutoResolveTmt = async () => {
-    if (!window.confirm('คุณต้องการรันระบบอัจฉริยะแปลง TMT (TPU -> GPU) และค้นหา WHO-ATC ผ่าน NIH RxNav API อัตโนมัติใช่หรือไม่?\n\n(ระบบจะค้นหายาที่ยังไม่มี ATC และบันทึกผลลัพธ์ลงฐานข้อมูลภายใน)')) {
+    if (!window.confirm('คุณต้องการรันระบบอัจฉริยะแปลง TMT (TPU -> GPU) และค้นหา WHO-ATC ผ่าน NIH RxNav API อัตโนมัติใช่หรือไม่?\n\n(ระบบจะทำงานในพื้นหลัง พร้อมแสดงความคืบหน้าแบบ Real-time)')) {
       return;
     }
     setResolvingTmt(true);
+    setShowProgressModal(true);
     try {
       const res = await autoResolveTmtToAtc({ force_remap: false });
-      setToastMessage(res.message || 'ประมวลผล TMT สำเร็จ');
-      setTimeout(() => setToastMessage(null), 6000);
-      fetchFormulary();
-      fetchTmtSummary();
+      setToastMessage(res.message || 'เริ่มกระบวนการแปลง TMT ในพื้นหลังแล้ว');
+      setTimeout(() => setToastMessage(null), 5000);
+      const prog = await getAutoResolveProgress();
+      setTaskProgress(prog);
     } catch (err) {
       alert('เกิดข้อผิดพลาดในการประมวลผล TMT อัตโนมัติ: ' + (err.response?.data?.detail || err.message));
-    } finally {
       setResolvingTmt(false);
     }
   };
@@ -206,15 +247,25 @@ export default function AtcMappingView() {
         </div>
 
         <div className="flex items-center space-x-2 self-end md:self-auto flex-wrap gap-y-2">
-          <button
-            onClick={handleAutoResolveTmt}
-            disabled={resolvingTmt}
-            className="px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer border border-amber-400/40 shadow-xs"
-            title="แปลง TMT เป็น GPU และจับคู่ WHO-ATC ผ่าน NIH RxNav API อัตโนมัติ (v1.3.0 Feature)"
-          >
-            <Sparkles className={`w-3.5 h-3.5 ${resolvingTmt ? 'animate-spin' : ''}`} />
-            <span>{resolvingTmt ? 'กำลังรัน TMT->ATC...' : '⚡ Auto-Map TMT/GPU API'}</span>
-          </button>
+          {resolvingTmt || taskProgress?.is_running ? (
+            <button
+              onClick={() => setShowProgressModal(true)}
+              className="px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer border border-amber-300/50 shadow-md animate-pulse"
+              title="คลิกเพื่อเปิดหน้าต่างติดตามความคืบหน้าแบบ Real-time"
+            >
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <span>{`⚡ กำลัง Auto-Map ${taskProgress?.percent !== undefined ? taskProgress.percent + '%' : '...'} (${taskProgress?.current_index || 0}/${taskProgress?.total || 0})`}</span>
+            </button>
+          ) : (
+            <button
+              onClick={handleAutoResolveTmt}
+              className="px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer border border-amber-400/40 shadow-xs"
+              title="แปลง TMT เป็น GPU และจับคู่ WHO-ATC ผ่าน NIH RxNav API อัตโนมัติ (v1.3.0 Feature)"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>⚡ Auto-Map TMT/GPU API</span>
+            </button>
+          )}
 
           <button
             onClick={handleSyncTmt}
@@ -596,6 +647,185 @@ export default function AtcMappingView() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Resolve TMT Live Progress Modal */}
+      {showProgressModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl max-w-xl w-full p-6 text-white space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="flex justify-between items-start border-b border-slate-800 pb-4">
+              <div className="flex items-center space-x-2.5">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+                  taskProgress?.status === 'completed'
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                    : taskProgress?.status === 'error'
+                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                    : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                }`}>
+                  <Sparkles className={`w-5 h-5 ${taskProgress?.status === 'running' ? 'animate-spin' : ''}`} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                    <span>ติดตามสถานะการแปลง TMT สู่รหัสยา WHO-ATC</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    ประมวลผลผ่าน Background Task พร้อมตรวจสอบผ่าน NIH RxNav API
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowProgressModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                title="ปิดหน้าต่าง (ระบบยังคงทำงานต่อในพื้นหลัง)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Status & Progress Bar */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-xs font-semibold">
+                <span className="flex items-center space-x-1.5 text-slate-300">
+                  <Activity className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>ความคืบหน้าโดยรวม:</span>
+                  <span className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
+                    taskProgress?.status === 'completed'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : taskProgress?.status === 'error'
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse'
+                  }`}>
+                    {taskProgress?.status === 'completed'
+                      ? 'เสร็จสิ้น 100%'
+                      : taskProgress?.status === 'error'
+                      ? 'พบข้อผิดพลาด'
+                      : `กำลังประมวลผล (${taskProgress?.percent || 0}%)`}
+                  </span>
+                </span>
+                <span className="font-mono text-amber-400 font-bold text-sm">
+                  {taskProgress?.percent || 0}% ({taskProgress?.current_index || 0}/{taskProgress?.total || 0})
+                </span>
+              </div>
+
+              <div className="w-full bg-slate-800/80 rounded-full h-3 overflow-hidden border border-slate-700/60 p-0.5">
+                <div
+                  className="h-full bg-gradient-to-r from-indigo-500 via-amber-500 to-emerald-500 rounded-full transition-all duration-300 relative"
+                  style={{ width: `${Math.min(100, Math.max(taskProgress?.percent || 0, taskProgress?.status === 'running' ? 2 : 0))}%` }}
+                >
+                  {taskProgress?.status === 'running' && (
+                    <div className="absolute inset-0 bg-white/25 animate-pulse rounded-full"></div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Currently Processing Drug Card */}
+            <div className="bg-slate-800/60 border border-slate-700/70 rounded-xl p-3.5 flex items-start space-x-3">
+              <div className="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Pill className={`w-4 h-4 ${taskProgress?.status === 'running' ? 'animate-bounce' : ''}`} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  รายการยาที่กำลังประมวลผลขณะนี้:
+                </div>
+                <div className="text-xs font-bold text-white font-mono mt-0.5 break-all">
+                  {taskProgress?.current_drug || 'กำลังเริ่มต้นกระบวนการ...'}
+                </div>
+              </div>
+            </div>
+
+            {/* Real-time Metric Counters Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-3">
+                <div className="text-[11px] text-slate-400 font-medium">📦 บัญชียาทั้งหมด</div>
+                <div className="text-lg font-bold text-white font-mono mt-0.5">
+                  {taskProgress?.total?.toLocaleString() || 0}
+                </div>
+              </div>
+
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-3">
+                <div className="text-[11px] text-teal-400 font-medium">🏷️ มีรหัส TMT/GPU</div>
+                <div className="text-lg font-bold text-teal-300 font-mono mt-0.5">
+                  {taskProgress?.has_tmt_count?.toLocaleString() || 0}
+                </div>
+              </div>
+
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-3">
+                <div className="text-[11px] text-emerald-400 font-medium">🎯 แมป ATC ได้</div>
+                <div className="text-lg font-bold text-emerald-300 font-mono mt-0.5">
+                  {taskProgress?.resolved_atc_count?.toLocaleString() || 0}
+                </div>
+              </div>
+
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-3">
+                <div className="text-[11px] text-amber-400 font-medium">✨ จับคู่ใหม่รอบนี้</div>
+                <div className="text-lg font-bold text-amber-300 font-mono mt-0.5">
+                  {taskProgress?.newly_mapped_count?.toLocaleString() || 0}
+                </div>
+              </div>
+
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-3 col-span-2 sm:col-span-2">
+                <div className="text-[11px] text-rose-400 font-medium flex items-center space-x-1">
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>กลุ่มยาเสี่ยงล้ม (FRID Identified)</span>
+                </div>
+                <div className="text-lg font-bold text-rose-300 font-mono mt-0.5">
+                  {taskProgress?.frid_mapped_count?.toLocaleString() || 0} รายการ
+                </div>
+              </div>
+            </div>
+
+            {/* Message / Notice Box */}
+            {taskProgress?.message && (
+              <div className={`p-3 rounded-xl text-xs border ${
+                taskProgress?.status === 'completed'
+                  ? 'bg-emerald-950/40 border-emerald-700/50 text-emerald-200'
+                  : taskProgress?.status === 'error'
+                  ? 'bg-rose-950/40 border-rose-700/50 text-rose-200'
+                  : 'bg-slate-800/70 border-slate-700 text-slate-300'
+              }`}>
+                {taskProgress.message}
+              </div>
+            )}
+
+            {/* Background notice tip */}
+            {taskProgress?.status === 'running' && (
+              <p className="text-[11px] text-slate-400 flex items-center space-x-1.5 leading-relaxed">
+                <span>💡</span>
+                <span>
+                  กระบวนการนี้ทำงานในพื้นหลัง (Non-blocking) คุณสามารถกดย่อหน้าต่างเพื่อคัดกรองผู้ป่วยหรือทำภารกิจอื่นได้โดยระบบไม่หยุดทำงาน
+                </span>
+              </p>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+              {taskProgress?.status === 'running' ? (
+                <button
+                  type="button"
+                  onClick={() => setShowProgressModal(false)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition cursor-pointer flex items-center space-x-1.5 shadow-xs"
+                >
+                  <span>ทำงานต่อในพื้นหลัง (ย่อหน้าต่าง)</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowProgressModal(false);
+                    fetchFormulary();
+                    fetchTmtSummary();
+                  }}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition cursor-pointer flex items-center space-x-1.5 shadow-xs"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>เสร็จสิ้น (ปิดหน้าต่าง)</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
