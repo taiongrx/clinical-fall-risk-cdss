@@ -243,5 +243,11 @@ export const setHospitalThreshold = async (threshold, reason = '') => {
   return response.data;
 };
 
+// Hospital Retrospective Bootstrap API
+export const bootstrapHospitalModel = async (payload = { lookback_years: 3, max_cases: 1000, control_ratio: 3, target_high_recall: true }) => {
+  const response = await api.post('/ml/bootstrap-hospital-model', payload);
+  return response.data;
+};
+
 export default api;
 

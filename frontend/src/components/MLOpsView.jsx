@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Cpu, RefreshCw, Award, CheckCircle, AlertTriangle, ShieldCheck, 
-  Zap, Layers, Trophy, Clock, CheckSquare, Brain, Target, Calendar
+  Zap, Layers, Trophy, Clock, CheckSquare, Brain, Target, Calendar,
+  Sparkles, Database
 } from 'lucide-react';
-import { getModelVersions, triggerRetraining, activateModel } from '../services/api';
+import { getModelVersions, triggerRetraining, activateModel, bootstrapHospitalModel } from '../services/api';
 
 export default function MLOpsView({ onModelUpdated }) {
   const [models, setModels] = useState([]);
@@ -15,6 +16,9 @@ export default function MLOpsView({ onModelUpdated }) {
   const [targetHighRecall, setTargetHighRecall] = useState(true);
   const [forceUpdate, setForceUpdate] = useState(false);
   const [notes, setNotes] = useState('');
+  const [bootstrapping, setBootstrapping] = useState(false);
+  const [bootstrapResult, setBootstrapResult] = useState(null);
+  const [bootstrapYears, setBootstrapYears] = useState(3);
   const [selectedAlgorithms, setSelectedAlgorithms] = useState([
     'Tabular_Deep_Neural_Net',
     'BalancedBagging_LightGBM',
@@ -114,6 +118,32 @@ export default function MLOpsView({ onModelUpdated }) {
     }
   };
 
+  const handleBootstrap = async () => {
+    if (!window.confirm(`ระบบจะดึงข้อมูลย้อนหลัง ${bootstrapYears} ปีจาก HOSxP ประจำโรงพยาบาล เพื่อสร้างชุดข้อมูลและจัดแข่งขันโมเดลเฉพาะโรงพยาบาลนี้ ดำเนินการต่อหรือไม่?`)) return;
+    setBootstrapping(true);
+    setBootstrapResult(null);
+    setRetrainResult(null);
+    try {
+      const res = await bootstrapHospitalModel({
+        lookback_years: Number(bootstrapYears),
+        max_cases: 1000,
+        control_ratio: 3,
+        target_high_recall: Boolean(targetHighRecall)
+      });
+      setBootstrapResult(res);
+      fetchModels();
+      if (onModelUpdated) onModelUpdated();
+    } catch (err) {
+      console.error("Bootstrap error:", err);
+      setBootstrapResult({
+        success: false,
+        message: err?.response?.data?.detail || "เกิดข้อผิดพลาดในการเชื่อมต่อ HOSxP เพื่อสกัดข้อมูลย้อนหลัง"
+      });
+    } finally {
+      setBootstrapping(false);
+    }
+  };
+
   const handleActivate = async (version) => {
     if (!window.confirm(`คุณต้องการสลับไปใช้งานโมเดลเวอร์ชัน ${version} ใช่หรือไม่?`)) return;
     try {
@@ -194,6 +224,95 @@ export default function MLOpsView({ onModelUpdated }) {
           </div>
         </div>
       )}
+
+      {/* 1-Click Hospital-Specific Model Bootstrap Card */}
+      <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white p-6 sm:p-7 rounded-3xl shadow-xl border border-indigo-500/30 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
+        
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-4 border-b border-indigo-900/60">
+          <div>
+            <div className="flex items-center space-x-2 mb-1">
+              <span className="px-2.5 py-0.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-full text-[11px] font-bold uppercase tracking-wider flex items-center space-x-1">
+                <Sparkles className="w-3.5 h-3.5 text-rose-400" />
+                <span>Hospital-Specific Autonomous MLOps</span>
+              </span>
+            </div>
+            <h3 className="text-xl font-black text-white flex items-center space-x-2">
+              <span>สกัดข้อมูลย้อนหลัง & เทรนโมเดลเฉพาะโรงพยาบาล (Auto-Bootstrap Model)</span>
+            </h3>
+            <p className="text-xs text-indigo-200 mt-1 max-w-2xl leading-relaxed">
+              เชื่อมต่อ HOSxP MySQL เพื่อสกัดเคสผู้สูงอายุย้อนหลัง {bootstrapYears} ปี (รหัสล้ม W00–W19, R29.6 และกลุ่มควบคุม), แมปยาเสี่ยง FRIDs และโรคร่วมอัตโนมัติ เพื่อสร้างและ Validate โมเดลเฉพาะบริบทโรงพยาบาลนี้ 100%
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+            <div className="bg-slate-900/80 px-3 py-2 rounded-xl border border-indigo-800/60 text-xs">
+              <label className="text-[10px] text-indigo-300 block font-semibold mb-0.5">ช่วงเวลาย้อนหลัง</label>
+              <select
+                value={bootstrapYears}
+                onChange={(e) => setBootstrapYears(Number(e.target.value))}
+                disabled={bootstrapping}
+                className="bg-transparent text-white font-bold outline-none cursor-pointer text-xs"
+              >
+                <option value="1" className="bg-slate-900 text-white">1 ปีย้อนหลัง</option>
+                <option value="2" className="bg-slate-900 text-white">2 ปีย้อนหลัง</option>
+                <option value="3" className="bg-slate-900 text-white">3 ปีย้อนหลัง (แนะนำ)</option>
+                <option value="5" className="bg-slate-900 text-white">5 ปีย้อนหลัง</option>
+              </select>
+            </div>
+
+            <button
+              onClick={handleBootstrap}
+              disabled={bootstrapping || retraining}
+              className="px-5 py-3 bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-extrabold rounded-2xl shadow-lg shadow-rose-950/60 flex items-center space-x-2 text-xs sm:text-sm transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <Database className={`w-4 h-4 ${bootstrapping ? 'animate-spin' : ''}`} />
+              <span>{bootstrapping ? 'กำลังสกัด HOSxP & เทรนโมเดล...' : '🚀 สกัดข้อมูล HOSxP & สร้างโมเดลของ รพ. ทันที'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Bootstrap Status / Results */}
+        {bootstrapResult && (
+          <div className={`mt-4 p-4 rounded-2xl border text-xs ${
+            bootstrapResult.success 
+              ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200' 
+              : 'bg-rose-950/60 border-rose-500/40 text-rose-200'
+          }`}>
+            <div className="flex items-start space-x-2.5">
+              {bootstrapResult.success ? (
+                <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
+              )}
+              <div className="space-y-1.5 flex-1">
+                <div className="font-bold text-sm text-white">
+                  {bootstrapResult.success ? '🎉 สกัดข้อมูลและสร้างโมเดลเฉพาะโรงพยาบาลสำเร็จ!' : '❌ ไม่สามารถสร้างโมเดลได้'}
+                </div>
+                <div>{bootstrapResult.message}</div>
+                {bootstrapResult.bootstrap_cohort && (
+                  <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
+                    <span className="bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-700">
+                      👥 ผู้ป่วยในชุดข้อมูล: <strong>{bootstrapResult.bootstrap_cohort.total_cohort?.toLocaleString()} ราย</strong>
+                    </span>
+                    <span className="bg-rose-900/40 text-rose-300 px-2.5 py-1 rounded-lg border border-rose-700/50">
+                      🚨 เคสที่มีการล้มจริง: <strong>{bootstrapResult.bootstrap_cohort.fall_cases?.toLocaleString()} ราย</strong>
+                    </span>
+                    <span className="bg-emerald-900/40 text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-700/50">
+                      🛡️ กลุ่มควบคุม: <strong>{bootstrapResult.bootstrap_cohort.controls?.toLocaleString()} ราย</strong>
+                    </span>
+                    {bootstrapResult.training_result?.auc_roc && (
+                      <span className="bg-sky-900/40 text-sky-300 px-2.5 py-1 rounded-lg border border-sky-700/50 font-bold">
+                        🏆 Local AUC-ROC: {(bootstrapResult.training_result.auc_roc * 100).toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Multi-Model Retraining Configuration Panel */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">

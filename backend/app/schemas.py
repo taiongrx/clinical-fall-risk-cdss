@@ -216,6 +216,8 @@ class TmtSummaryResponse(BaseModel):
     mapped_frid: int
     unmapped_count: int
 
-
-
-
+class BootstrapHospitalRequest(BaseModel):
+    lookback_years: int = 3
+    max_cases: int = 1000
+    control_ratio: int = 3
+    target_high_recall: bool = True

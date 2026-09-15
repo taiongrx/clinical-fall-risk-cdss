@@ -16,7 +16,7 @@ from .schemas import (
     AtcCandidate, AtcMappingAcceptRequest, TmtUpdateRequest,
     ThresholdSimulationRequest, HospitalThresholdUpdateRequest,
     TmtAutoResolveRequest, TmtAutoResolveResponse, TmtSummaryResponse,
-    TmtResolveProgressResponse
+    TmtResolveProgressResponse, BootstrapHospitalRequest
 )
 from .hosxp import fetch_patient_data_from_hosxp, fetch_elderly_visits_by_date_range, get_latest_vstdate_in_hosxp
 from .ml.predictor import predict_patient_fall_risk
@@ -1027,6 +1027,24 @@ def trigger_retraining(request: RetrainRequest):
         notes=request.notes
     )
     return RetrainResponse(**result)
+
+@app.post("/api/ml/bootstrap-hospital-model")
+def trigger_hospital_bootstrap(request: BootstrapHospitalRequest):
+    """
+    Automated Hospital MLOps Bootstrap Pipeline:
+    1. Extracts 3-year retrospective cohort from local hospital HOSxP MySQL
+    2. Builds local clinical feature matrix (FRIDs, chronic diseases)
+    3. Executes 6-model tournament with 3-Fold Stratified Cross Validation
+    4. Automatically activates local champion model for OPD Triage
+    """
+    from .ml.bootstrap import bootstrap_and_retrain_hospital_model
+    res = bootstrap_and_retrain_hospital_model(
+        lookback_years=request.lookback_years,
+        max_cases=request.max_cases,
+        control_ratio=request.control_ratio,
+        target_high_recall=request.target_high_recall
+    )
+    return res
 
 @app.get("/api/models")
 def list_models(db: Session = Depends(get_db)):

@@ -14,7 +14,9 @@ from .schemas import (
     RetrainRequest, RetrainResponse, ModelVersionResponse, SystemConfigUpdate,
     LoginRequest, LoginResponse, UserResponse, LoginLogResponse,
     AtcCandidate, AtcMappingAcceptRequest, TmtUpdateRequest,
-    ThresholdSimulationRequest, HospitalThresholdUpdateRequest
+    ThresholdSimulationRequest, HospitalThresholdUpdateRequest,
+    TmtAutoResolveRequest, TmtAutoResolveResponse, TmtSummaryResponse,
+    TmtResolveProgressResponse, BootstrapHospitalRequest
 )
 from .hosxp import fetch_patient_data_from_hosxp, fetch_elderly_visits_by_date_range, get_latest_vstdate_in_hosxp
 from .ml.predictor import predict_patient_fall_risk
@@ -56,7 +58,7 @@ def clean_for_json(obj):
 app = FastAPI(
     title="Sai Buri Hospital - Fall Risk ML Platform",
     description="Containerized Clinical Fall Risk Prediction, Elderly Automated Screening, Continuous Learning, and Cybersecurity Auth Platform",
-    version="1.2.0"
+    version="1.3.0"
 )
 
 app.add_middleware(
@@ -1026,6 +1028,24 @@ def trigger_retraining(request: RetrainRequest):
     )
     return RetrainResponse(**result)
 
+@app.post("/api/ml/bootstrap-hospital-model")
+def trigger_hospital_bootstrap(request: BootstrapHospitalRequest):
+    """
+    Automated Hospital MLOps Bootstrap Pipeline:
+    1. Extracts 3-year retrospective cohort from local hospital HOSxP MySQL
+    2. Builds local clinical feature matrix (FRIDs, chronic diseases)
+    3. Executes 6-model tournament with 3-Fold Stratified Cross Validation
+    4. Automatically activates local champion model for OPD Triage
+    """
+    from .ml.bootstrap import bootstrap_and_retrain_hospital_model
+    res = bootstrap_and_retrain_hospital_model(
+        lookback_years=request.lookback_years,
+        max_cases=request.max_cases,
+        control_ratio=request.control_ratio,
+        target_high_recall=request.target_high_recall
+    )
+    return res
+
 @app.get("/api/models")
 def list_models(db: Session = Depends(get_db)):
     models = db.query(ModelVersion).order_by(ModelVersion.created_at.desc()).all()
@@ -1147,6 +1167,58 @@ def sync_tmt_from_his(db: Session = Depends(get_db)):
     from .ml.atc_tagger import sync_all_tmt_codes_from_his
     res = sync_all_tmt_codes_from_his(db=db)
     return res
+
+@app.post("/api/atc/auto-resolve-tmt", response_model=TmtAutoResolveResponse)
+def auto_resolve_tmt_to_atc(
+    req: TmtAutoResolveRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Version 1.3.0 Feature:
+    Extracts TMT Hierarchy (TPU -> GPU -> Substance) from HIS,
+    queries NIH NLM RxNav WHO-ATC API, classifies FRIDs,
+    and updates the local database in a resilient background task.
+    """
+    from .ml.atc_tagger import run_batch_auto_resolve_task, get_auto_resolve_progress
+    prog = get_auto_resolve_progress()
+    if prog.get("is_running"):
+        return TmtAutoResolveResponse(
+            status="already_running",
+            total_drugs=prog.get("total", 0),
+            has_tmt_count=prog.get("has_tmt_count", 0),
+            resolved_atc_count=prog.get("resolved_atc_count", 0),
+            newly_mapped_count=prog.get("newly_mapped_count", 0),
+            frid_mapped_count=prog.get("frid_mapped_count", 0),
+            message="ระบบกำลังประมวลผลการแปลง TMT อยู่แล้วในพื้นหลัง"
+        )
+
+    background_tasks.add_task(run_batch_auto_resolve_task, force_remap=req.force_remap, limit=req.limit)
+    return TmtAutoResolveResponse(
+        status="started",
+        total_drugs=0,
+        has_tmt_count=0,
+        resolved_atc_count=0,
+        newly_mapped_count=0,
+        frid_mapped_count=0,
+        message="เริ่มกระบวนการแปลง TMT (TPU -> GPU) และค้นหา WHO-ATC ในพื้นหลังเรียบร้อยแล้ว"
+    )
+
+@app.get("/api/atc/auto-resolve-progress", response_model=TmtResolveProgressResponse)
+def get_auto_resolve_tmt_progress():
+    """
+    Returns live real-time progress of TMT-ATC auto-resolution background task.
+    """
+    from .ml.atc_tagger import get_auto_resolve_progress
+    return get_auto_resolve_progress()
+
+@app.get("/api/atc/tmt-summary", response_model=TmtSummaryResponse)
+def get_tmt_formulary_summary(db: Session = Depends(get_db)):
+    """
+    Returns TMT and ATC mapping statistics for hospital formulary.
+    """
+    from .ml.atc_tagger import get_hospital_tmt_summary
+    return get_hospital_tmt_summary(db=db)
+
 
 @app.get("/api/atc/formulary")
 def get_hospital_drug_formulary(

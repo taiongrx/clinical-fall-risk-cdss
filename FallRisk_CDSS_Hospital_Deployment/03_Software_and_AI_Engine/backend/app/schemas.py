@@ -179,5 +179,45 @@ class HospitalThresholdUpdateRequest(BaseModel):
     threshold: float = Field(..., ge=0.05, le=0.95, description="New hospital default threshold")
     reason: Optional[str] = Field(None, max_length=255, description="Clinical rationale for adjustment")
 
+class TmtAutoResolveRequest(BaseModel):
+    force_remap: bool = Field(False, description="Whether to re-resolve drugs that already have ATC mapping")
+    limit: int = Field(5000, ge=1, le=10000, description="Maximum drugs to process")
 
+class TmtAutoResolveResponse(BaseModel):
+    status: str
+    total_drugs: int = 0
+    has_tmt_count: int = 0
+    resolved_atc_count: int = 0
+    newly_mapped_count: int = 0
+    frid_mapped_count: int = 0
+    message: str
 
+class TmtResolveProgressResponse(BaseModel):
+    is_running: bool
+    status: str
+    current_index: int = 0
+    total: int = 0
+    percent: float = 0.0
+    current_drug: str = ""
+    has_tmt_count: int = 0
+    resolved_atc_count: int = 0
+    newly_mapped_count: int = 0
+    frid_mapped_count: int = 0
+    message: str = ""
+    error: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+class TmtSummaryResponse(BaseModel):
+    total_drugs: int
+    has_tmt: int
+    has_did: int
+    mapped_atc: int
+    mapped_frid: int
+    unmapped_count: int
+
+class BootstrapHospitalRequest(BaseModel):
+    lookback_years: int = 3
+    max_cases: int = 1000
+    control_ratio: int = 3
+    target_high_recall: bool = True
