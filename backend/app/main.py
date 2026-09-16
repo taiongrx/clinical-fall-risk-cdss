@@ -1350,8 +1350,13 @@ def get_hospital_drug_formulary(
                 desc = db_rec.atc_description
                 tmt_code = db_rec.tmt_code or tmt_val
                 did_code = db_rec.did or did_val
-                from .ml.atc_tagger import is_sedating_antihistamine
-                if atc_code and atc_code.startswith('R06') and not is_sedating_antihistamine(atc_code):
+                from .ml.atc_tagger import is_sedating_antihistamine, normalize_atc, NON_SEDATING_ANTIHISTAMINES
+                atc_code = normalize_atc(atc_code)
+                full_drug_text = f"{d_name} {g_name}".lower()
+                if any(ah in full_drug_text for ah in NON_SEDATING_ANTIHISTAMINES):
+                    frid_grp = 'NON_FRID'
+                    desc = desc or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+                elif atc_code and atc_code.startswith('R06') and not is_sedating_antihistamine(atc_code):
                     frid_grp = 'NON_FRID'
             else:
                 atc_code, frid_grp, desc = tag_drug_atc(icode=ic, drug_name=d_name, generic_name=g_name, raw_group=rg, did=did_val, tmt_code=tmt_val)

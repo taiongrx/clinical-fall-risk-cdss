@@ -14,6 +14,23 @@ if os.path.exists(csv_path):
     except Exception as e:
         print(f"[ATCTagger] Error loading manual_atc_mapping.csv: {e}")
 
+def normalize_atc(code: str) -> str:
+    """
+    Normalizes ATC code to standard uppercase human WHO-ATC format.
+    Strips leading 'Q' from veterinary ATCvet codes (e.g. QM01AB05 -> M01AB05).
+    """
+    if not code or not isinstance(code, str):
+        return ""
+    c = code.strip().upper()
+    if c.startswith('Q') and len(c) > 3 and c[1].isalpha():
+        return c[1:]
+    return c
+
+NON_SEDATING_ANTIHISTAMINES = [
+    'loratadine', 'desloratadine', 'cetirizine', 'levocetirizine',
+    'fexofenadine', 'bilastine', 'rupatadine'
+]
+
 def is_sedating_antihistamine(atc_code: str) -> bool:
     """
     Returns True ONLY if the ATC code belongs to 1st-generation sedating antihistamines
@@ -21,30 +38,30 @@ def is_sedating_antihistamine(atc_code: str) -> bool:
     2nd-generation antihistamines (e.g. Cetirizine R06AE07, Loratadine R06AX13, Fexofenadine R06AX26)
     have minimal BBB penetration and are NOT Fall-Risk-Increasing Drugs (FRIDs).
     """
-    if not atc_code or not isinstance(atc_code, str):
+    c = normalize_atc(atc_code)
+    if not c:
         return False
-    c = atc_code.strip().upper()
-    return any(c.startswith(pfx) for pfx in ['R06AA', 'R06AB', 'R06AD', 'R06AX02'])
+    return any(c.startswith(pfx) for pfx in ['R06AA', 'R06AB', 'R06AC', 'R06AD', 'R06AX02', 'R06AX07', 'R06AX19'])
 
 # Regex-based ATC Matching Rules for Hospital Formulary
 ATC_REGEX_RULES = [
     # 1. Sedatives & Hypnotics (N05BA, N05CD, N05CF)
-    (r'\b(diazepam|lorazepam|clonazepam|alprazolam|midazolam|zolpidem|clobazam|flurazepam|nitrazepam|triazolam|estazolam|chlordiazepoxide)\b', 'N05BA', 'sedative / hypnotics', 'Anxiolytics, Sedatives & Hypnotics'),
+    (r'\b(diazepam|lorazepam|clonazepam|alprazolam|midazolam|zolpidem|clobazam|flurazepam|nitrazepam|triazolam|estazolam|chlordiazepoxide|clorazepate)\b', 'N05BA', 'sedative / hypnotics', 'Anxiolytics, Sedatives & Hypnotics'),
     # 2. Antipsychotics (N05A)
-    (r'\b(haloperidol|risperidone|quetiapine|olanzapine|chlorpromazine|perphenazine|trifluoperazine|aripiprazole|clozapine|sulpiride|fluphenazine|zuclopenthixol)\b', 'N05A', 'ANTIPSYCHOTIC', 'Antipsychotics'),
+    (r'\b(haloperidol|risperidone|quetiapine|olanzapine|chlorpromazine|perphenazine|trifluoperazine|aripiprazole|clozapine|sulpiride|fluphenazine|zuclopenthixol|paliperidone|flupentixol)\b', 'N05A', 'ANTIPSYCHOTIC', 'Antipsychotics'),
     # 3. Antidepressants (N06A)
-    (r'\b(sertraline|fluoxetine|amitriptyline|nortriptyline|escitalopram|citalopram|venlafaxine|duloxetine|mirtazapine|trazodone|fluvoxamine|paroxetine|imipramine|clomipramine)\b', 'N06A', 'Antidepressant', 'Antidepressants'),
+    (r'\b(sertraline|fluoxetine|amitriptyline|nortriptyline|escitalopram|citalopram|venlafaxine|duloxetine|mirtazapine|trazodone|fluvoxamine|paroxetine|imipramine|clomipramine|vortioxetine|agomelatine)\b', 'N06A', 'Antidepressant', 'Antidepressants'),
     # 4. Antiepileptics / Anticonvulsants (N03A)
-    (r'\b(gabapentin|pregabalin|valproate|valproic|phenytoin|carbamazepine|levetiracetam|topiramate|lamotrigine|phenobarbital|oxcarbazepine|zonisamide|lacosamide)\b', 'N03A', 'ANTIEPILEPTIC', 'Antiepileptics'),
-    # 5. Narcotics & Opioids (N02A)
-    (r'\b(tramadol|morphine|fentanyl|pethidine|codeine|methadone|oxycodone|buprenorphine|hydromorphone|pethidine)\b', 'N02A', 'NARCOTICs', 'Opioids & Narcotics'),
-    # 6. NSAIDs (M01A)
-    (r'\b(ibuprofen|naproxen|diclofenac|celecoxib|etoricoxib|mefenamic|meloxicam|piroxicam|indomethacin|ketorolac|nabumetone|sulindac|aspirin 300|aspirin 500)\b', 'M01A', 'NSAIDs', 'Anti-inflammatory and Antirheumatic Products (NSAIDs)'),
+    (r'\b(gabapentin|pregabalin|valproate|valproic|sodiumvalproate|depakine|phenytoin|carbamazepine|levetiracetam|topiramate|lamotrigine|phenobarbital|oxcarbazepine|zonisamide|lacosamide)\b', 'N03A', 'ANTIEPILEPTIC', 'Antiepileptics'),
+    # 5. Narcotics & Opioids (N02A, N01AH, N07BC)
+    (r'\b(tramadol|morphine|fentanyl|pethidine|codeine|methadone|oxycodone|buprenorphine|hydromorphone|opium|brown mixture)\b', 'N02A', 'NARCOTICs', 'Opioids & Narcotics'),
+    # 6. NSAIDs (M01A, M01B, G02CC)
+    (r'\b(ibuprofen|naproxen|diclofenac|celecoxib|etoricoxib|mefenamic|meloxicam|piroxicam|indomethacin|ketorolac|nabumetone|sulindac|lornoxicam|aspirin 300|aspirin 500)\b', 'M01A', 'NSAIDs', 'Anti-inflammatory and Antirheumatic Products (NSAIDs)'),
     # 7. Antihistamines (1st Generation Sedating only per AGS Beers 2023 / STOPPFall 2021)
     (r'\b(chlorpheniramine|cpm|hydroxyzine|diphenhydramine|dimenhydrinate|cyproheptadine|brompheniramine|dexchlorpheniramine|triprolidine|carbinoxamine|clemastine|promethazine)\b', 'R06AB', 'ANTIHISTAMINE', 'First-generation Sedating Antihistamines'),
     # 7b. Second-generation Non-sedating Antihistamines (Explicit NON_FRID per AGS Beers 2023 / STOPPFall 2021)
     (r'\b(loratadine|cetirizine|fexofenadine|desloratadine|levocetirizine|bilastine|rupatadine)\b', 'R06AX', 'NON_FRID', 'Second-generation Non-sedating Antihistamines (Non-FRID)'),
-    # 8. Diuretics (C03)
+    # 8. Diuretics (C03, S01EC, B05BC)
     (r'\b(furosemide|spironolactone|hydrochlorothiazide|hctz|indapamide|amiloride|acetazolamide|mannitol|torasemide)\b', 'C03', 'DIURETICS', 'Diuretics'),
     # 9. Alpha-1 Adrenergic Antagonists (G04CA, C02CA)
     (r'\b(doxazosin|prazosin|alfuzosin|tamsulosin|silodosin|terazosin)\b', 'G04CA', 'Alpha-1 adrenergic antagonist', 'Alpha-adrenoreceptor Antagonists'),
@@ -54,25 +71,33 @@ ATC_REGEX_RULES = [
     (r'\b(amlodipine|felodipine|manidipine|lercanidipine|verapamil|diltiazem|nicardipine|nifedipine|hydralazine|methyldopa|clonidine)\b', 'C08CA', 'ANTIHYPERTENSIVE', 'Calcium Channel Blockers & Antihypertensives'),
     (r'\b(enalapril|lisinopril|ramipril|losartan|valsartan|candesartan|irbesartan|telmisartan|captopril|perindopril|olmesartan)\b', 'C09AA', 'ANTIHYPERTENSIVE', 'ACE Inhibitors & Angiotensin II Antagonists'),
     # 12. Antidiabetic Drugs (A10)
-    (r'\b(metformin|glipizide|glimepiride|gliclazide|pioglitazone|linagliptin|sitagliptin|vildagliptin|empagliflozin|dapagliflozin|insulin|mixtard|lantus|novorapid|humalog|ryzodeg)\b', 'A10B', 'ANTIDIABETIC DRUGS', 'Blood Glucose Lowering Drugs'),
+    (r'\b(metformin|glipizide|glimepiride|gliclazide|glibenclamide|glyburide|pioglitazone|linagliptin|sitagliptin|vildagliptin|empagliflozin|dapagliflozin|insulin|mixtard|lantus|novorapid|humalog|ryzodeg|repaglinide|acarbose)\b', 'A10B', 'ANTIDIABETIC DRUGS', 'Blood Glucose Lowering Drugs'),
 ]
 
 # ATC Prefix to FRID Group Mapping
-# Note: R06 is restricted to 1st-generation sedating antihistamines (R06AA, R06AB, R06AD, R06AX02)
+# Note: R06 is restricted to 1st-generation sedating antihistamines (R06AA, R06AB, R06AC, R06AD, R06AX02, R06AX07, R06AX19)
 # 2nd-generation antihistamines (R06AE cetirizine, R06AX13 loratadine, R06AX26 fexofenadine, etc.) are NOT FRIDs.
 ATC_PREFIX_TO_FRID = {
     'N05B': ('sedative / hypnotics', 'Sedatives & Anxiolytics'),
     'N05C': ('sedative / hypnotics', 'Hypnotics & Sedatives'),
     'N05A': ('ANTIPSYCHOTIC', 'Antipsychotics'),
     'N06A': ('Antidepressant', 'Antidepressants'),
+    'N03AE':('sedative / hypnotics', 'Benzodiazepine Anticonvulsants (Clonazepam)'),
     'N03A': ('ANTIEPILEPTIC', 'Antiepileptics'),
     'N02A': ('NARCOTICs', 'Opioids'),
+    'N01AH':('NARCOTICs', 'Opioid Anesthetics (Fentanyl, etc.)'),
+    'N07BC':('NARCOTICs', 'Opioids in Addiction Treatment (Methadone, etc.)'),
     'M01A': ('NSAIDs', 'NSAIDs'),
-    'R06AA': ('ANTIHISTAMINE', '1st-gen Antihistamines (Aminoalkyl ethers)'),
-    'R06AB': ('ANTIHISTAMINE', '1st-gen Antihistamines (Substituted alkylamines)'),
-    'R06AD': ('ANTIHISTAMINE', '1st-gen Antihistamines (Phenothiazine derivatives)'),
-    'R06AX02': ('ANTIHISTAMINE', '1st-gen Antihistamines (Cyproheptadine)'),
+    'M01B': ('NSAIDs', 'Anti-inflammatory combinations'),
+    'G02CC':('NSAIDs', 'Anti-inflammatory products (Naproxen, etc.)'),
+    'R06AA':('ANTIHISTAMINE', '1st-gen Antihistamines (Aminoalkyl ethers)'),
+    'R06AB':('ANTIHISTAMINE', '1st-gen Antihistamines (Substituted alkylamines)'),
+    'R06AC':('ANTIHISTAMINE', '1st-gen Antihistamines (Ethylenediamines)'),
+    'R06AD':('ANTIHISTAMINE', '1st-gen Antihistamines (Phenothiazine derivatives)'),
+    'R06AX02':('ANTIHISTAMINE', '1st-gen Antihistamines (Cyproheptadine)'),
     'C03':  ('DIURETICS', 'Diuretics'),
+    'S01EC':('DIURETICS', 'Carbonic anhydrase inhibitors (Acetazolamide)'),
+    'B05BC':('DIURETICS', 'Osmotic Diuretics (Mannitol)'),
     'G04CA':('Alpha-1 adrenergic antagonist', 'Alpha-1 Blockers'),
     'C02CA':('Alpha-1 adrenergic antagonist', 'Alpha-1 Blockers'),
     'C07':  ('BETA-BLOCKING AGENTS', 'Beta-Blockers'),
@@ -85,10 +110,10 @@ ATC_PREFIX_TO_FRID = {
 def map_atc_to_frid_group(atc_code: str):
     if not atc_code or not isinstance(atc_code, str):
         return None, None
-    atc_clean = atc_code.strip().upper()
-    for pfx, (grp, desc) in ATC_PREFIX_TO_FRID.items():
+    atc_clean = normalize_atc(atc_code)
+    for pfx in sorted(ATC_PREFIX_TO_FRID.keys(), key=len, reverse=True):
         if atc_clean.startswith(pfx):
-            return grp, desc
+            return ATC_PREFIX_TO_FRID[pfx]
     return None, None
 
 def reload_db_mappings(db=None):
@@ -140,11 +165,17 @@ def save_drug_atc_mapping(
     from datetime import datetime
 
     icode_clean = str(icode).strip()
-    atc_clean = str(atc_code).strip().upper()
+    atc_clean = normalize_atc(atc_code)
     tmt_clean = str(tmt_code).strip() if tmt_code else None
     did_clean = str(did).strip() if did else None
+    d_name = str(drug_name or '').strip()
+    g_name = str(generic_name or '').strip()
+    full_text = f"{d_name} {g_name}".lower()
 
-    if not frid_group:
+    if any(ah in full_text for ah in NON_SEDATING_ANTIHISTAMINES):
+        frid_group = 'NON_FRID'
+        atc_desc = atc_desc or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+    elif not frid_group:
         if atc_clean.startswith('R06'):
             if is_sedating_antihistamine(atc_clean):
                 frid_group = 'ANTIHISTAMINE'
@@ -469,20 +500,39 @@ def tag_drug_atc(
     """
     Converts patient drug into standard ATC Code & FRID Group using 
     CHABA manual mapping, TMT/DID standard codes, regex, and therapeutic groups.
+    Enforces strict clinical non-FRID classification for 2nd-gen antihistamines.
     """
     icode_str = str(icode).strip()
-    
-    # 1. Check CHABA manual mapping dictionary first
-    if icode_str in manual_dict:
-        atc_code = manual_dict[icode_str]
-        frid_grp, desc = map_atc_to_frid_group(atc_code)
-        if frid_grp:
-            return atc_code, frid_grp, desc
-        if atc_code and atc_code.startswith('R06'):
-            return atc_code, 'NON_FRID', desc or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
-        return atc_code, raw_group or 'OTHER', desc or 'ATC Mapped'
+    d_name = str(drug_name or '').strip()
+    g_name = str(generic_name or '').strip()
+    rg = str(raw_group or '').strip()
+    full_text_lower = f"{d_name} {g_name}".lower()
 
-    # 1.1 Check cross-hospital DID 24-digit or TMT code if provided
+    # Preprocess text to separate numbers and letters for clean word boundary matching
+    # e.g. 'sodiumvalproate', 'linagliptin2.5/metformin850', 'depakine200'
+    spaced_text = re.sub(r'([a-zA-Z])([0-9])', r'\1 \2', full_text_lower)
+    spaced_text = re.sub(r'([0-9])([a-zA-Z])', r'\1 \2', spaced_text)
+    spaced_text = re.sub(r'[\/\+\-\_\,\(\)\[\]]', ' ', spaced_text)
+    spaced_text = f"{spaced_text} {rg.lower()}"
+
+    # =========================================================================
+    # GUARD 1: CLINICAL ANTI-HALLUCINATION / SAFETY LOCKOUT FOR 2ND-GEN ANTIHISTAMINES
+    # Per AGS Beers Criteria 2023 & STOPPFall 2021, these must NEVER be FRIDs.
+    # =========================================================================
+    if any(ah in full_text_lower for ah in NON_SEDATING_ANTIHISTAMINES):
+        atc = 'R06AX'
+        if 'loratadine' in full_text_lower: atc = 'R06AX13'
+        elif 'desloratadine' in full_text_lower: atc = 'R06AX27'
+        elif 'cetirizine' in full_text_lower: atc = 'R06AE07'
+        elif 'levocetirizine' in full_text_lower: atc = 'R06AE09'
+        elif 'fexofenadine' in full_text_lower: atc = 'R06AX26'
+        elif 'bilastine' in full_text_lower: atc = 'R06AX29'
+        elif 'rupatadine' in full_text_lower: atc = 'R06AX28'
+        return atc, 'NON_FRID', 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+
+    # =========================================================================
+    # 1. Check cross-hospital DID 24-digit or TMT standard code if provided
+    # =========================================================================
     did_clean = str(did).strip() if did else ''
     tmt_clean = str(tmt_code).strip() if tmt_code else ''
     if did_clean or tmt_clean:
@@ -498,25 +548,47 @@ def tag_drug_atc(
                     match_rec = None
                 
                 if match_rec and match_rec.atc_code:
-                    manual_dict[icode_str] = match_rec.atc_code
-                    if match_rec.atc_code.startswith('R06'):
-                        if is_sedating_antihistamine(match_rec.atc_code):
-                            return match_rec.atc_code, 'ANTIHISTAMINE', match_rec.atc_description or 'First-generation Sedating Antihistamines'
+                    rec_atc = normalize_atc(match_rec.atc_code)
+                    manual_dict[icode_str] = rec_atc
+                    if any(ah in full_text_lower for ah in NON_SEDATING_ANTIHISTAMINES):
+                        return rec_atc, 'NON_FRID', 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+                    if rec_atc.startswith('R06'):
+                        if is_sedating_antihistamine(rec_atc):
+                            return rec_atc, 'ANTIHISTAMINE', match_rec.atc_description or 'First-generation Sedating Antihistamines'
                         else:
-                            return match_rec.atc_code, 'NON_FRID', match_rec.atc_description or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
-                    return match_rec.atc_code, match_rec.frid_group or 'OTHER', match_rec.atc_description or 'TMT Mapped'
+                            return rec_atc, 'NON_FRID', match_rec.atc_description or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+                    inferred_grp, inferred_desc = map_atc_to_frid_group(rec_atc)
+                    return rec_atc, inferred_grp or match_rec.frid_group or 'NON_FRID', inferred_desc or match_rec.atc_description or 'TMT Mapped'
         except Exception:
             pass
 
-    # 2. Match against formulation regex rules
-    search_text = f"{drug_name} {generic_name} {raw_group}".lower()
+    # =========================================================================
+    # 2. Check CHABA manual mapping dictionary
+    # =========================================================================
+    if icode_str in manual_dict:
+        atc_code = normalize_atc(manual_dict[icode_str])
+        frid_grp, desc = map_atc_to_frid_group(atc_code)
+        if any(ah in full_text_lower for ah in NON_SEDATING_ANTIHISTAMINES):
+            return atc_code, 'NON_FRID', 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+        if frid_grp:
+            return atc_code, frid_grp, desc
+        if atc_code and atc_code.startswith('R06'):
+            return atc_code, 'NON_FRID', desc or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+        # If mapped to non-FRID ATC, return NON_FRID, NEVER elevate to FRID via unvetted raw_group
+        return atc_code, 'NON_FRID', desc or 'ATC Mapped'
+
+    # =========================================================================
+    # 3. Match against formulation regex rules (with space normalization)
+    # =========================================================================
     for pattern, atc_pfx, frid_grp, desc in ATC_REGEX_RULES:
-        if re.search(pattern, search_text, re.IGNORECASE):
+        if re.search(pattern, spaced_text, re.IGNORECASE) or re.search(pattern, full_text_lower, re.IGNORECASE):
             return atc_pfx, frid_grp, desc
 
-    # 3. Fallback to existing therapeutic group
-    if raw_group and str(raw_group).strip():
-        rg_upper = str(raw_group).strip().upper()
+    # =========================================================================
+    # 4. Controlled Fallback to existing HOSxP therapeutic group
+    # =========================================================================
+    if rg:
+        rg_upper = rg.upper()
         if 'SEDATIVE' in rg_upper or 'HYPNOTIC' in rg_upper:
             return 'N05BA', 'sedative / hypnotics', 'Sedatives & Hypnotics'
         elif 'PSYCHOTIC' in rg_upper:
@@ -541,10 +613,10 @@ def tag_drug_atc(
             return 'C07A', 'BETA-BLOCKING AGENTS', 'Beta-Blockers'
         elif 'HYPERTENS' in rg_upper:
             return 'C08CA', 'ANTIHYPERTENSIVE', 'Antihypertensives'
-        elif 'DIABET' in rg_upper:
+        elif 'DIABET' in rg_upper or 'HYPOGLYCEM' in rg_upper or 'INSULIN' in rg_upper:
             return 'A10B', 'ANTIDIABETIC DRUGS', 'Antidiabetics'
 
-    return None, raw_group or 'NON_FRID', 'Unclassified'
+    return None, 'NON_FRID', 'Unclassified'
 
 
 def resolve_atc_from_tmt_gpu(gpu_name: str = '', substance_name: str = '', generic_name: str = '', drug_name: str = '', session_cache: dict = None) -> tuple:
@@ -571,6 +643,20 @@ def resolve_atc_from_tmt_gpu(gpu_name: str = '', substance_name: str = '', gener
         if cleaned_drg and cleaned_drg not in candidates:
             candidates.append(cleaned_drg)
 
+    all_text = f"{substance_name} {gpu_name} {generic_name} {drug_name}".lower()
+
+    # Pre-check 2nd-gen antihistamines
+    if any(ah in all_text for ah in NON_SEDATING_ANTIHISTAMINES):
+        atc = 'R06AX'
+        if 'loratadine' in all_text: atc = 'R06AX13'
+        elif 'desloratadine' in all_text: atc = 'R06AX27'
+        elif 'cetirizine' in all_text: atc = 'R06AE07'
+        elif 'levocetirizine' in all_text: atc = 'R06AE09'
+        elif 'fexofenadine' in all_text: atc = 'R06AX26'
+        elif 'bilastine' in all_text: atc = 'R06AX29'
+        elif 'rupatadine' in all_text: atc = 'R06AX28'
+        return atc, 'NON_FRID', 'Second-generation Non-sedating Antihistamines (Non-FRID)', "Clinical Evidence Rules"
+
     for term in candidates:
         if not term or len(term) < 2:
             continue
@@ -584,10 +670,18 @@ def resolve_atc_from_tmt_gpu(gpu_name: str = '', substance_name: str = '', gener
         api_results = search_atc_from_api(term, generic_name=term)
         if api_results:
             best = api_results[0]
-            atc = best['atc_code']
-            grp = best.get('frid_group') or 'OTHER'
+            atc = normalize_atc(best['atc_code'])
+            grp = best.get('frid_group') or 'NON_FRID'
             desc = best.get('class_name') or best.get('frid_desc') or 'WHO-ATC Classified'
             src = best.get('source') or 'NIH RxNav (WHO-ATC)'
+
+            if any(ah in all_text for ah in NON_SEDATING_ANTIHISTAMINES):
+                grp = 'NON_FRID'
+                desc = 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+            elif atc.startswith('R06') and not is_sedating_antihistamine(atc):
+                grp = 'NON_FRID'
+                desc = 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+
             res = (atc, grp, desc, src)
             session_cache[term] = res
             return res
@@ -595,12 +689,15 @@ def resolve_atc_from_tmt_gpu(gpu_name: str = '', substance_name: str = '', gener
         session_cache[term] = None
 
     # Fallback to formulation regex
-    full_text = f"{substance_name} {gpu_name} {generic_name} {drug_name}".lower()
+    spaced_text = re.sub(r'([a-zA-Z])([0-9])', r'\1 \2', all_text)
+    spaced_text = re.sub(r'([0-9])([a-zA-Z])', r'\1 \2', spaced_text)
+    spaced_text = re.sub(r'[\/\+\-\_\,\(\)\[\]]', ' ', spaced_text)
+
     for pattern, atc_pfx, frid_grp, desc in ATC_REGEX_RULES:
-        if re.search(pattern, full_text, re.IGNORECASE):
+        if re.search(pattern, spaced_text, re.IGNORECASE) or re.search(pattern, all_text, re.IGNORECASE):
             return atc_pfx, frid_grp, desc, "Hospital Formulary Rules"
 
-    return None, None, None, None
+    return None, 'NON_FRID', 'Unclassified', None
 
 
 TMT_RESOLVE_PROGRESS = {
@@ -768,6 +865,15 @@ def batch_auto_resolve_hospital_tmt(force_remap: bool = False, limit: int = 5000
             )
 
             if atc:
+                atc = normalize_atc(atc)
+                all_name = f"{drug_name} {generic_name} {gpu_name} {substance_name}".lower()
+                if any(ah in all_name for ah in NON_SEDATING_ANTIHISTAMINES):
+                    grp = 'NON_FRID'
+                    desc = desc or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+                elif atc.startswith('R06') and not is_sedating_antihistamine(atc):
+                    grp = 'NON_FRID'
+                    desc = desc or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+
                 resolved_atc_count += 1
                 TMT_RESOLVE_PROGRESS["resolved_atc_count"] = resolved_atc_count
                 is_frid = grp and grp not in ['OTHER', 'NON_FRID', 'Unclassified']
