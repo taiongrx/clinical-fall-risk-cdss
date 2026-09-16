@@ -1,4 +1,4 @@
-﻿# AGENT DIRECTIVE: PRODUCTION-GRADE HEALTHCARE ARCHITECT & RESILIENT SYSTEM ENGINE
+# AGENT DIRECTIVE: PRODUCTION-GRADE HEALTHCARE ARCHITECT & RESILIENT SYSTEM ENGINE
 
 ## 1. BACKEND REALITY CHECK & DB GUARD (paranoid-db-guard)
 - **Connection Management:** ห้ามสร้าง raw database connection ใหม่ต่อทุก request ต้องใช้ Connection Pool เสมอ
@@ -128,3 +128,15 @@
     - `Critical`: หยุดทันที เช่น Drug-Drug Interaction รุนแรง หรือ PII หลุด
     - `Warning`: เตือนเพื่อตรวจสอบ เช่น ข้อมูลเคลมไม่ครบ
     - `Info`: สรุปยอดรายวัน / Batch report ประจำสัปดาห์
+
+## 21. HOSPITAL DEPLOYMENT INTEGRITY & AUTOMATED PACKAGING (zero-stale-dist-guard)
+- **Zero Stale Frontend Distributions:**
+  - ห้ามคัดลอกไฟล์ frontend แบบแมนนวลหรือปล่อยให้โฟลเดอร์แจกจ่ายโรงพยาบาล (`FallRisk_CDSS_Hospital_Deployment/`) ใช้ไฟล์ `frontend_dist/` ที่ค้างจากการ build ในอดีต
+  - ทุกครั้งที่มีการแก้ไข UI หรือ logic ฝั่ง Frontend ต้องคอมไพล์ผ่าน `npm run build` ใน `frontend/` และรันตัวสร้างแพ็กเกจอัตโนมัติ `python scripts/build_hospital_deployment.py --zip` เสมอ
+- **Deterministic Clinical Engine & Dictionary Mirroring:**
+  - รหัสและพจนานุกรมยา (`manual_atc_mapping.csv`, `atc_tagger.py`, `sanitize_atc.py`) รวมถึงโมเดล ML ในแพ็กเกจส่งมอบ ต้องซิงค์ตรงกับโค้ดหลัก 100% โดยห้ามมีรหัสสัตวแพทย์ 'Q' หลงเหลือ และต้องมี Safety Guard ล็อก Non-sedating antihistamines เป็น `NON_FRID`
+- **Tenant-Neutral & Dynamic Branding:**
+  - แพ็กเกจติดตั้งโรงพยาบาลต้องไม่มีการ Hardcode ชื่อโรงพยาบาลหรือ IP/Credentials เฉพาะที่ลงในโค้ด ต้องรองรับการดึงชื่อโรงพยาบาลผ่าน Dynamic Settings และ `.env` เสมอ
+- **Release Verification & Manifest:**
+  - ก่อนส่งมอบหรืออัปเดตเครื่องโรงพยาบาล ต้องผ่าน Quality Gates 5 ขั้น และสร้าง `RELEASE_MANIFEST.json` พร้อม SHA-256 Checksum ตรวจสอบความถูกต้องทุกครั้ง
+

@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Tuple
 import pandas as pd
@@ -58,3 +58,10 @@ class BaseHISAdapter(ABC):
         Columns required: [icode, name, generic_name, did, tmt_tp_code, tmt_gp_code, therapeuticgroup]
         """
         pass
+
+    def fetch_drugs_with_tmt_hierarchy(self, limit: int = 5000) -> pd.DataFrame:
+        """
+        Returns hospital drug formulary resolved with TMT Hierarchy (TPU -> GPU -> Substance).
+        Columns: [icode, drug_name, generic_name, did, tpu_code, gpu_code, gpu_name, substance_name, raw_group]
+        """
+        return pd.DataFrame()

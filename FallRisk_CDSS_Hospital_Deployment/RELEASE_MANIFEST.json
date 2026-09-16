@@ -1,0 +1,13 @@
+{
+  "release_version": "v1.4.0",
+  "build_timestamp": "2026-09-16T16:10:50.734863",
+  "git_commit": "df73700",
+  "critical_checksums_sha256": {
+    "frontend_index_html": "dd8b52a3f3ad21590740919dce6c92c9b7bd72429915a65b8ae37838672b4777",
+    "backend_main_py": "2968ecda9bc9a4e672a0c802b4bb48ce8ba85deda5795c732cddba81bfe9681c",
+    "atc_tagger_py": "2443774a631bc3ff58e3fdd213259e1a2bd170e2e85bdf9d7e05c8cc085982b3",
+    "manual_atc_mapping_csv": "4aa77e53b74e1541a115e9213c076d8adf488e8f761147a49eaf1ef05bcfaff8",
+    "lgbm_model": "4c2f7fe24b3a2f5871582cc5c415847b41e79b1d0a45eab0e45e9e54a426767d",
+    "preprocessor": "21294ae1c3fde5bc3ca1ec5828a8248a26e7a2e25a62af541df06bf7a5561352"
+  }
+}
