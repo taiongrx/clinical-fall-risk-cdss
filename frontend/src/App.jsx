@@ -132,7 +132,7 @@ export default function App() {
   if (!isAuthenticated) {
     return (
       <ErrorBoundary>
-        <LoginView onLoginSuccess={handleLoginSuccess} />
+        <LoginView onLoginSuccess={handleLoginSuccess} hospitalName={daemonInfo?.hospital_name} />
       </ErrorBoundary>
     );
   }
@@ -149,17 +149,17 @@ export default function App() {
           daemonInfo={daemonInfo}
           currentUser={currentUser}
           onLogout={handleLogout}
-          onSelectPatient={(p) => setModalPatient(p)}
+          onSelectPatient={(hn) => setModalPatient({ hn })}
           theme={theme}
           onToggleTheme={toggleTheme}
         />
 
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
           <ErrorBoundary>
-            {activeTab === 'triage' && <HighRiskTriageView />}
-            {activeTab === 'assess' && <AssessmentView onAssessmentSaved={checkStatus} />}
+            {activeTab === 'triage' && <HighRiskTriageView onSelectPatient={(pt) => setModalPatient(pt)} />}
+            {activeTab === 'assess' && <AssessmentView />}
             {activeTab === 'atc' && <AtcMappingView />}
-            {activeTab === 'feedback' && <FeedbackView onOutcomeRecorded={checkStatus} />}
+            {activeTab === 'feedback' && <FeedbackView />}
             {activeTab === 'mlops' && <MLOpsView onModelUpdated={checkStatus} />}
             {activeTab === 'analytics' && <AnalyticsView />}
           </ErrorBoundary>
@@ -173,10 +173,9 @@ export default function App() {
         )}
 
         <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-500 dark:text-slate-400">
-          ระบบวิจัยและสนับสนุนการตัดสินใจทางคลินิก (CDSS) โรงพยาบาลสมเด็จพระยุพราชสายบุรี &bull; Continuous ML Architecture with Docker & Node.js
+          ระบบสนับสนุนการตัดสินใจทางคลินิก (Clinical Fall Risk CDSS) {daemonInfo?.hospital_name ? `• ${daemonInfo.hospital_name}` : ''} &bull; Continuous ML Architecture with Docker & Node.js
         </footer>
       </div>
     </ErrorBoundary>
   );
 }
-

@@ -64,13 +64,15 @@ export default function Navbar({
             <div>
               <div className="flex items-center space-x-2">
                 <span className="font-bold text-base tracking-tight text-white">
-                  Sai Buri Fall-Risk AI
+                  Clinical Fall Risk CDSS
                 </span>
                 <span className="bg-teal-950 text-teal-300 text-[10px] px-2 py-0.5 rounded border border-teal-800 font-medium">
-                  CDS Platform
+                  {daemonInfo?.app_version || 'v1.4.0'}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 font-normal">รพร.สายบุรี &bull; งานวิจัยเวชศาสตร์ผู้สูงอายุ</p>
+              <p className="text-[11px] text-slate-400 font-normal">
+                {daemonInfo?.hospital_name || 'ระบบประเมินความเสี่ยงหกล้มในผู้สูงอายุ'} &bull; CDSS Platform
+              </p>
             </div>
           </div>
 

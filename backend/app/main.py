@@ -79,14 +79,31 @@ def on_startup():
         print("[Startup] Warning sanitizing ATC mappings:", e)
     print("[Startup] Database initialized. Active ML Version:", registry.active_version)
 
+@app.get("/api/system/info")
+def get_system_info():
+    return {
+        "hospital_name": settings.HOSPITAL_NAME,
+        "hospital_code": settings.HOSPITAL_CODE,
+        "app_title": "Clinical Fall Risk CDSS",
+        "app_version": "v1.4.0",
+        "active_version": registry.active_version,
+    }
+
 @app.get("/api/daemon/status")
 def get_daemon_status(db: Session = Depends(get_db)):
     import ast
+    base_info = {
+        "hospital_name": settings.HOSPITAL_NAME,
+        "hospital_code": settings.HOSPITAL_CODE,
+        "app_version": "v1.4.0",
+        "app_title": "Clinical Fall Risk CDSS",
+    }
     record = db.query(SystemSetting).filter(SystemSetting.key == "daemon_heartbeat").first()
     if record and record.value:
         try:
             data = ast.literal_eval(record.value)
             return {
+                **base_info,
                 "is_running": True,
                 "status": data.get("status", "running"),
                 "last_pulse": data.get("last_pulse"),
@@ -100,6 +117,7 @@ def get_daemon_status(db: Session = Depends(get_db)):
         except Exception:
             pass
     return {
+        **base_info,
         "is_running": False,
         "status": "idle",
         "last_pulse": None,

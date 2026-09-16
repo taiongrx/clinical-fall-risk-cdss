@@ -93,15 +93,15 @@ export default function LoginView({ onLoginSuccess }) {
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center justify-center space-x-2">
             <span className="bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
-              Sai Buri FallRisk AI
+              Clinical Fall Risk CDSS
             </span>
           </h1>
           <p className="text-xs text-slate-400 mt-1.5 font-medium leading-relaxed">
-            ระบบปัญญาประดิษฐ์ประเมินและคัดกรองความเสี่ยงหกล้มผู้สูงอายุ
+            ระบบปัญญาประดิษฐ์ประเมินและคัดกรองความเสี่ยงหกล้มผู้สูงอายุ (AI Platform v1.4)
           </p>
           <div className="inline-flex items-center space-x-1.5 mt-3 px-3.5 py-1 bg-slate-800/80 border border-slate-700/80 rounded-full text-[11px] text-slate-300 font-semibold backdrop-blur-md">
             <Building2 className="w-3.5 h-3.5 text-rose-400" />
-            <span>โรงพยาบาลสมเด็จพระยุพราชสายบุรี</span>
+            <span>{hospitalName || 'ระบบสนับสนุนการตัดสินใจทางคลินิก'}</span>
           </div>
         </div>
 
@@ -231,7 +231,7 @@ export default function LoginView({ onLoginSuccess }) {
 
       {/* Footer info */}
       <div className="mt-6 text-center text-xs text-slate-500 font-medium">
-        &copy; {new Date().getFullYear()} Sai Buri Crown Prince Hospital. All rights reserved.
+        &copy; {new Date().getFullYear()} Clinical Fall Risk CDSS. All rights reserved.
       </div>
     </div>
   );
