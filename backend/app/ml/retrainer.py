@@ -177,6 +177,9 @@ class MultiModelRetrainer:
             else:
                 df_combined = df_base
 
+            if not df_combined.empty:
+                df_combined = df_combined.reset_index(drop=True)
+
             if df_combined.empty or 'case_control_group' not in df_combined.columns:
                 return {
                     'success': False,
@@ -219,7 +222,54 @@ class MultiModelRetrainer:
             ]
             X = df_combined[feature_cols].copy()
 
-            # Preprocessor: Categorical (sex) + Numerical Scaling (age_y)
+            # 5. Temporal Cohort Validation Split (Strict Prospective Non-overlapping Time Periods)
+            temporal_split_info = None
+            use_temporal_split = False
+
+            if 'index_date' in df_combined.columns:
+                try:
+                    df_combined['index_date'] = pd.to_datetime(df_combined['index_date'], errors='coerce').fillna(pd.Timestamp.now())
+                    # Stratified Chronological Split:
+                    # Derivation/Training Set: Earlier 75% chronologically
+                    # Prospective Temporal Validation Set: Subsequent consecutive 25% chronologically
+                    train_indices = []
+                    val_indices = []
+
+                    for cls in [0, 1]:
+                        sub = df_combined[df_combined[target_col] == cls].sort_values(by='index_date')
+                        n_total = len(sub)
+                        n_tr = int(n_total * 0.75)
+                        if n_tr > 0 and (n_total - n_tr) > 0:
+                            train_indices.extend(sub.index[:n_tr])
+                            val_indices.extend(sub.index[n_tr:])
+
+                    if len(train_indices) >= 20 and len(val_indices) >= 10:
+                        train_indices = np.array(train_indices)
+                        val_indices = np.array(val_indices)
+                        use_temporal_split = True
+
+                        tr_start = df_combined.loc[train_indices, 'index_date'].min().strftime('%Y-%m-%d')
+                        tr_end = df_combined.loc[train_indices, 'index_date'].max().strftime('%Y-%m-%d')
+                        val_start = df_combined.loc[val_indices, 'index_date'].min().strftime('%Y-%m-%d')
+                        val_end = df_combined.loc[val_indices, 'index_date'].max().strftime('%Y-%m-%d')
+
+                        temporal_split_info = {
+                            'train_size': len(train_indices),
+                            'val_size': len(val_indices),
+                            'train_start': tr_start,
+                            'train_end': tr_end,
+                            'val_start': val_start,
+                            'val_end': val_end,
+                            'train_pos': int(y[train_indices].sum()),
+                            'val_pos': int(y[val_indices].sum())
+                        }
+                        print(f"[Temporal Validation Split] Derivation (Train): N={len(train_indices)} ({tr_start} to {tr_end}, Pos={temporal_split_info['train_pos']})")
+                        print(f"[Temporal Validation Split] Prospective Validation: N={len(val_indices)} ({val_start} to {val_end}, Pos={temporal_split_info['val_pos']})")
+                except Exception as ex:
+                    print(f"[Temporal Split Warning] Fallback to cross-validation: {ex}")
+                    use_temporal_split = False
+
+            # Preprocessor setup
             preprocessor = ColumnTransformer(
                 transformers=[
                     ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), ['sex']),
@@ -228,10 +278,30 @@ class MultiModelRetrainer:
                 remainder='passthrough'
             )
 
-            X_transformed = preprocessor.fit_transform(X)
+            # Full transformed dataset for final model training and feature extraction
+            X_full_transformed = preprocessor.fit_transform(X)
+            raw_feature_names = list(X.columns)
+            try:
+                encoded_feature_names = list(preprocessor.get_feature_names_out())
+            except Exception:
+                encoded_feature_names = raw_feature_names
 
-            # 5. Multi-Model Tournament Execution (Stratified 3-Fold CV)
-            skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+            if use_temporal_split:
+                # Strictly fit preprocessor on historical derivation set only to prevent leakage
+                train_prep = ColumnTransformer(
+                    transformers=[
+                        ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), ['sex']),
+                        ('num', StandardScaler(), ['age_y'])
+                    ],
+                    remainder='passthrough'
+                )
+                X_tr = train_prep.fit_transform(X.iloc[train_indices])
+                y_tr = y[train_indices]
+                X_val = train_prep.transform(X.iloc[val_indices])
+                y_val = y[val_indices]
+            else:
+                skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+
             candidates = self.get_candidate_architectures()
             if candidate_models:
                 candidates = {k: v for k, v in candidates.items() if k in candidate_models}
@@ -241,29 +311,15 @@ class MultiModelRetrainer:
 
             tournament_results = []
             fitted_models = {}
-
             timestamp_tag = datetime.now().strftime('%Y%m%d_%H%M%S')
-            raw_feature_names = list(X.columns)
-            try:
-                encoded_feature_names = list(preprocessor.get_feature_names_out())
-            except Exception:
-                encoded_feature_names = raw_feature_names
 
             for key, cand in candidates.items():
                 t0 = time.time()
                 name = cand['name']
-                print(f"[Tournament] Training candidate architecture: {name} (Threshold: {decision_thresh})...")
+                print(f"[Tournament] Evaluating candidate architecture: {name} (Threshold: {decision_thresh}, Split: {'Temporal' if use_temporal_split else 'StratifiedKFold'})...")
 
-                cv_aucs = []
-                cv_recalls = []
-                cv_precisions = []
-                cv_f1s = []
-                cv_specificities = []
-
-                for train_idx, val_idx in skf.split(X_transformed, y):
-                    X_tr, X_val = X_transformed[train_idx], X_transformed[val_idx]
-                    y_tr, y_val = y[train_idx], y[val_idx]
-
+                if use_temporal_split:
+                    # Prospective Temporal Holdout Evaluation (Out-of-Time Generalization)
                     clf = cand['builder']()
                     clf.fit(X_tr, y_tr)
 
@@ -272,27 +328,49 @@ class MultiModelRetrainer:
                     else:
                         y_prob = clf.predict(X_val)
 
-                    cv_aucs.append(roc_auc_score(y_val, y_prob))
-                    
+                    mean_auc = round(float(roc_auc_score(y_val, y_prob)), 4)
                     y_pred = (y_prob >= decision_thresh).astype(int)
-                    cv_recalls.append(recall_score(y_val, y_pred, zero_division=0))
-                    cv_precisions.append(precision_score(y_val, y_pred, zero_division=0))
-                    cv_f1s.append(f1_score(y_val, y_pred, zero_division=0))
-                    
+                    mean_rec = round(float(recall_score(y_val, y_pred, zero_division=0)), 4)
+                    mean_prec = round(float(precision_score(y_val, y_pred, zero_division=0)), 4)
+                    mean_f1 = round(float(f1_score(y_val, y_pred, zero_division=0)), 4)
+
                     tn, fp, fn, tp = confusion_matrix(y_val, y_pred, labels=[0, 1]).ravel()
-                    spec = tn / (tn + fp) if (tn + fp) > 0 else 0
-                    cv_specificities.append(spec)
+                    mean_spec = round(float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0, 4)
+                else:
+                    # Fallback K-Fold Cross Validation
+                    cv_aucs, cv_recalls, cv_precisions, cv_f1s, cv_specificities = [], [], [], [], []
+                    for train_idx, val_idx in skf.split(X_full_transformed, y):
+                        X_t, X_v = X_full_transformed[train_idx], X_full_transformed[val_idx]
+                        y_t, y_v = y[train_idx], y[val_idx]
 
-                # Fit full dataset
+                        clf = cand['builder']()
+                        clf.fit(X_t, y_t)
+
+                        if hasattr(clf, 'predict_proba'):
+                            y_prob = clf.predict_proba(X_v)[:, 1]
+                        else:
+                            y_prob = clf.predict(X_v)
+
+                        cv_aucs.append(roc_auc_score(y_v, y_prob))
+                        y_pred = (y_prob >= decision_thresh).astype(int)
+                        cv_recalls.append(recall_score(y_v, y_pred, zero_division=0))
+                        cv_precisions.append(precision_score(y_v, y_pred, zero_division=0))
+                        cv_f1s.append(f1_score(y_v, y_pred, zero_division=0))
+
+                        tn, fp, fn, tp = confusion_matrix(y_v, y_pred, labels=[0, 1]).ravel()
+                        spec = tn / (tn + fp) if (tn + fp) > 0 else 0
+                        cv_specificities.append(spec)
+
+                    mean_auc = round(float(np.mean(cv_aucs)), 4)
+                    mean_rec = round(float(np.mean(cv_recalls)), 4)
+                    mean_prec = round(float(np.mean(cv_precisions)), 4)
+                    mean_f1 = round(float(np.mean(cv_f1s)), 4)
+                    mean_spec = round(float(np.mean(cv_specificities)), 4)
+
+                # Fit final model on full transformed dataset
                 final_clf = cand['builder']()
-                final_clf.fit(X_transformed, y)
+                final_clf.fit(X_full_transformed, y)
                 train_time = round(time.time() - t0, 2)
-
-                mean_auc = round(float(np.mean(cv_aucs)), 4)
-                mean_rec = round(float(np.mean(cv_recalls)), 4)
-                mean_prec = round(float(np.mean(cv_precisions)), 4)
-                mean_f1 = round(float(np.mean(cv_f1s)), 4)
-                mean_spec = round(float(np.mean(cv_specificities)), 4)
 
                 version_tag = f"v{timestamp_tag}_{key}"
                 model_filename = f'model_{version_tag}.joblib'
@@ -320,14 +398,16 @@ class MultiModelRetrainer:
                     'specificity': mean_spec,
                     'training_time_seconds': train_time,
                     'dataset_size': len(df_combined),
-                    'positive_samples': int(np.sum(y))
+                    'positive_samples': int(np.sum(y)),
+                    'validation_mode': 'temporal_split' if use_temporal_split else 'stratified_kfold',
+                    'temporal_split': temporal_split_info
                 }
                 tournament_results.append(result_entry)
 
             # 6. Tournament Ranking: Prioritize High Recall (>= 80%) then AUC-ROC
             tournament_results.sort(key=lambda x: (x['recall'] >= 0.80, x['auc_roc'], x['recall']), reverse=True)
             champion = tournament_results[0]
-            print(f"[Tournament 🏆 Champion] {champion['algorithm_name']} | AUC: {champion['auc_roc']*100:.2f}% | Recall: {champion['recall']*100:.1f}% | Spec: {champion['specificity']*100:.1f}%")
+            print(f"[Tournament Winner Champion] {champion['algorithm_name']} | AUC: {champion['auc_roc']*100:.2f}% | Recall: {champion['recall']*100:.1f}% | Spec: {champion['specificity']*100:.1f}%")
 
             # Check promotion gate
             current_active = db.query(ModelVersion).filter(ModelVersion.is_active == True).first()
@@ -343,6 +423,13 @@ class MultiModelRetrainer:
                 if is_this_active:
                     db.query(ModelVersion).update({ModelVersion.is_active: False})
 
+                split_desc = (
+                    f"Prospective Temporal Split (Train: {temporal_split_info['train_start']}..{temporal_split_info['train_end']} N={temporal_split_info['train_size']}, "
+                    f"Val: {temporal_split_info['val_start']}..{temporal_split_info['val_end']} N={temporal_split_info['val_size']})"
+                    if use_temporal_split else f"Cross-Validation Split (Window: {training_window_years}y)"
+                )
+                notes_text = f"{'Champion Winner | ' if idx == 0 else ''}{notes or 'Tournament Candidate'} ({split_desc}, Thresh: {decision_thresh})"
+
                 mv = ModelVersion(
                     version=res['version_tag'],
                     algorithm_name=res['algorithm_name'],
@@ -357,7 +444,7 @@ class MultiModelRetrainer:
                     positive_samples=res['positive_samples'],
                     training_time_seconds=res['training_time_seconds'],
                     is_active=is_this_active,
-                    notes=f"{'🏆 Champion Winner | ' if idx == 0 else ''}{notes or 'Tournament Candidate'} (Window: {training_window_years}y, Thresh: {decision_thresh})"
+                    notes=notes_text
                 )
                 db.add(mv)
 
@@ -379,7 +466,7 @@ class MultiModelRetrainer:
 
             return {
                 'success': True,
-                'message': f"Tournament Completed! 🏆 Champion: {champion['algorithm_name']} (AUC: {champion['auc_roc']*100:.2f}%, Recall: {champion['recall']*100:.1f}%)",
+                'message': f"Tournament Completed! Champion: {champion['algorithm_name']} (AUC: {champion['auc_roc']*100:.2f}%, Recall: {champion['recall']*100:.1f}%)",
                 'model_version': champion['version_tag'],
                 'champion_algorithm': champion['algorithm_name'],
                 'previous_auc': previous_auc,
@@ -389,6 +476,8 @@ class MultiModelRetrainer:
                 'f1_score': champion['f1_score'],
                 'specificity': champion['specificity'],
                 'dataset_size': champion['dataset_size'],
+                'validation_mode': 'temporal_split' if use_temporal_split else 'stratified_kfold',
+                'temporal_split': temporal_split_info,
                 'promoted_to_active': promoted,
                 'tournament_results': tournament_results
             }
