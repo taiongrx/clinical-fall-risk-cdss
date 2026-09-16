@@ -2,13 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { 
   Cpu, RefreshCw, Award, CheckCircle, AlertTriangle, ShieldCheck, 
   Zap, Layers, Trophy, Clock, CheckSquare, Brain, Target, Calendar,
-  Sparkles, Database
+  Sparkles, Database, Building2, Save
 } from 'lucide-react';
-import { getModelVersions, triggerRetraining, activateModel, bootstrapHospitalModel } from '../services/api';
+import { 
+  getModelVersions, triggerRetraining, activateModel, bootstrapHospitalModel,
+  getSystemInfo, updateSystemSettings
+} from '../services/api';
 
 export default function MLOpsView({ onModelUpdated }) {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [hospitalName, setHospitalName] = useState('');
+  const [hospitalCode, setHospitalCode] = useState('');
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsSuccess, setSettingsSuccess] = useState(null);
   const [retraining, setRetraining] = useState(false);
   const [retrainResult, setRetrainResult] = useState(null);
   const [minAuc, setMinAuc] = useState(0.65);
@@ -80,8 +87,41 @@ export default function MLOpsView({ onModelUpdated }) {
     }
   };
 
+  const fetchSystemInfo = async () => {
+    try {
+      const info = await getSystemInfo();
+      if (info) {
+        setHospitalName(info.hospital_name || '');
+        setHospitalCode(info.hospital_code || '');
+      }
+    } catch (e) {
+      console.error('Error fetching system info:', e);
+    }
+  };
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    setSettingsSuccess(null);
+    try {
+      const res = await updateSystemSettings({
+        hospital_name: hospitalName,
+        hospital_code: hospitalCode
+      });
+      setSettingsSuccess(res.message || 'บันทึกการตั้งค่าโรงพยาบาลสำเร็จ');
+      window.dispatchEvent(new CustomEvent('model:updated'));
+      if (onModelUpdated) onModelUpdated();
+      setTimeout(() => setSettingsSuccess(null), 4000);
+    } catch (err) {
+      alert('บันทึกการตั้งค่าไม่สำเร็จ: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   useEffect(() => {
     fetchModels();
+    fetchSystemInfo();
   }, []);
 
   const toggleAlgorithm = (id) => {
@@ -181,6 +221,83 @@ export default function MLOpsView({ onModelUpdated }) {
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           <span>รีเฟรชประวัติโมเดล</span>
         </button>
+      </div>
+
+      {/* Hospital & Organization Settings Card */}
+      <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-6 rounded-2xl shadow-sm border border-slate-700">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-teal-500/20 border border-teal-500/30 flex items-center justify-center text-teal-400">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                <span>ข้อมูลหน่วยบริการ / โรงพยาบาล (Hospital Settings)</span>
+                <span className="bg-teal-900/80 text-teal-300 text-[10px] px-2 py-0.5 rounded border border-teal-700 font-semibold">
+                  Multi-Hospital
+                </span>
+              </h3>
+              <p className="text-xs text-slate-300 mt-0.5">
+                กำหนดชื่อโรงพยาบาลและรหัสสถานพยาบาล เพื่อให้ระบบ ป้ายหัวโปรแกรม และเอกสารทั้งหมดปรับตามหน่วยงานที่ใช้งานจริงอัตโนมัติ
+              </p>
+            </div>
+          </div>
+          {settingsSuccess && (
+            <div className="bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs px-3 py-1.5 rounded-lg flex items-center space-x-2 animate-fade-in">
+              <CheckCircle className="w-4 h-4 text-emerald-400" />
+              <span>{settingsSuccess}</span>
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleSaveSettings} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+          <div className="md:col-span-6 space-y-1.5">
+            <label className="text-xs font-semibold text-slate-300">
+              ชื่อโรงพยาบาล (Hospital Name)
+            </label>
+            <input
+              type="text"
+              value={hospitalName}
+              onChange={(e) => setHospitalName(e.target.value)}
+              placeholder="เช่น โรงพยาบาลโคกโพธิ์"
+              required
+              className="w-full bg-slate-800/90 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+
+          <div className="md:col-span-3 space-y-1.5">
+            <label className="text-xs font-semibold text-slate-300">
+              รหัสสถานพยาบาล (HCODE 5 หลัก)
+            </label>
+            <input
+              type="text"
+              value={hospitalCode}
+              onChange={(e) => setHospitalCode(e.target.value)}
+              placeholder="เช่น 10987"
+              className="w-full bg-slate-800/90 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+
+          <div className="md:col-span-3">
+            <button
+              type="submit"
+              disabled={savingSettings}
+              className="w-full h-10 px-4 bg-teal-600 hover:bg-teal-500 text-white font-semibold rounded-xl text-sm transition shadow flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer"
+            >
+              {savingSettings ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>กำลังบันทึก...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>บันทึกชื่อโรงพยาบาล</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* Active Model Status Card */}

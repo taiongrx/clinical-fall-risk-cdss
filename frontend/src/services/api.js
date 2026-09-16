@@ -249,5 +249,16 @@ export const bootstrapHospitalModel = async (payload = { lookback_years: 3, max_
   return response.data;
 };
 
+// System Settings API (Hospital Name, HCODE, Threshold)
+export const getSystemInfo = async () => {
+  const response = await api.get('/system/info');
+  return response.data;
+};
+
+export const updateSystemSettings = async (payload) => {
+  const response = await api.post('/system/settings', payload);
+  return response.data;
+};
+
 export default api;
 

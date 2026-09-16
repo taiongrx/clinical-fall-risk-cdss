@@ -80,21 +80,86 @@ def on_startup():
     print("[Startup] Database initialized. Active ML Version:", registry.active_version)
 
 @app.get("/api/system/info")
-def get_system_info():
+def get_system_info(db: Session = Depends(get_db)):
+    hosp_name_rec = db.query(SystemSetting).filter(SystemSetting.key == "hospital_name").first()
+    hosp_code_rec = db.query(SystemSetting).filter(SystemSetting.key == "hospital_code").first()
+    threshold_rec = db.query(SystemSetting).filter(SystemSetting.key == "default_threshold").first()
+
+    hosp_name = hosp_name_rec.value if (hosp_name_rec and hosp_name_rec.value) else settings.HOSPITAL_NAME
+    hosp_code = hosp_code_rec.value if (hosp_code_rec and hosp_code_rec.value) else settings.HOSPITAL_CODE
+    def_threshold = float(threshold_rec.value) if (threshold_rec and threshold_rec.value) else settings.DEFAULT_THRESHOLD
+
     return {
-        "hospital_name": settings.HOSPITAL_NAME,
-        "hospital_code": settings.HOSPITAL_CODE,
+        "hospital_name": hosp_name,
+        "hospital_code": hosp_code,
+        "default_threshold": def_threshold,
         "app_title": "Clinical Fall Risk CDSS",
         "app_version": "v1.4.0",
         "active_version": registry.active_version,
     }
 
+@app.post("/api/system/settings")
+def update_system_settings(data: dict, db: Session = Depends(get_db)):
+    """
+    Updates hospital organization name, code, and clinical threshold in system_settings table.
+    """
+    hosp_name = data.get("hospital_name")
+    hosp_code = data.get("hospital_code")
+    threshold = data.get("default_threshold")
+
+    if hosp_name is not None and str(hosp_name).strip():
+        val = str(hosp_name).strip()
+        rec = db.query(SystemSetting).filter(SystemSetting.key == "hospital_name").first()
+        if not rec:
+            rec = SystemSetting(key="hospital_name", value=val, description="Hospital Full Name")
+            db.add(rec)
+        else:
+            rec.value = val
+        settings.HOSPITAL_NAME = val
+
+    if hosp_code is not None and str(hosp_code).strip():
+        val = str(hosp_code).strip()
+        rec = db.query(SystemSetting).filter(SystemSetting.key == "hospital_code").first()
+        if not rec:
+            rec = SystemSetting(key="hospital_code", value=val, description="Hospital 5-digit HCODE")
+            db.add(rec)
+        else:
+            rec.value = val
+        settings.HOSPITAL_CODE = val
+
+    if threshold is not None:
+        try:
+            th_val = float(threshold)
+            rec = db.query(SystemSetting).filter(SystemSetting.key == "default_threshold").first()
+            if not rec:
+                rec = SystemSetting(key="default_threshold", value=str(th_val), description="Clinical Decision Cutoff Threshold")
+                db.add(rec)
+            else:
+                rec.value = str(th_val)
+            settings.DEFAULT_THRESHOLD = th_val
+        except (ValueError, TypeError):
+            pass
+
+    db.commit()
+    return {
+        "success": True,
+        "message": "บันทึกการตั้งค่าหน่วยบริการและโรงพยาบาลสำเร็จ",
+        "hospital_name": settings.HOSPITAL_NAME,
+        "hospital_code": settings.HOSPITAL_CODE,
+        "default_threshold": settings.DEFAULT_THRESHOLD
+    }
+
 @app.get("/api/daemon/status")
 def get_daemon_status(db: Session = Depends(get_db)):
     import ast
+    hosp_name_rec = db.query(SystemSetting).filter(SystemSetting.key == "hospital_name").first()
+    hosp_code_rec = db.query(SystemSetting).filter(SystemSetting.key == "hospital_code").first()
+    hosp_name = hosp_name_rec.value if (hosp_name_rec and hosp_name_rec.value) else settings.HOSPITAL_NAME
+    hosp_code = hosp_code_rec.value if (hosp_code_rec and hosp_code_rec.value) else settings.HOSPITAL_CODE
+
     base_info = {
-        "hospital_name": settings.HOSPITAL_NAME,
-        "hospital_code": settings.HOSPITAL_CODE,
+        "hospital_name": hosp_name,
+        "hospital_code": hosp_code,
         "app_version": "v1.4.0",
         "app_title": "Clinical Fall Risk CDSS",
     }
