@@ -1,7 +1,7 @@
 {
   "release_version": "v1.4.0",
-  "build_timestamp": "2026-09-16T16:10:50.734863",
-  "git_commit": "df73700",
+  "build_timestamp": "2026-09-16T22:05:27.255314",
+  "git_commit": "0c468df",
   "critical_checksums_sha256": {
     "frontend_index_html": "dd8b52a3f3ad21590740919dce6c92c9b7bd72429915a65b8ae37838672b4777",
     "backend_main_py": "2968ecda9bc9a4e672a0c802b4bb48ce8ba85deda5795c732cddba81bfe9681c",
