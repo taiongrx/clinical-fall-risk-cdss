@@ -72,6 +72,11 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
+    try:
+        from .sanitize_atc import sanitize_antihistamines_in_db
+        sanitize_antihistamines_in_db()
+    except Exception as e:
+        print("[Startup] Warning sanitizing ATC mappings:", e)
     print("[Startup] Database initialized. Active ML Version:", registry.active_version)
 
 @app.get("/api/daemon/status")
@@ -1262,6 +1267,9 @@ def get_hospital_drug_formulary(
                 desc = db_rec.atc_description
                 tmt_code = db_rec.tmt_code or tmt_val
                 did_code = db_rec.did or did_val
+                from .ml.atc_tagger import is_sedating_antihistamine
+                if atc_code and atc_code.startswith('R06') and not is_sedating_antihistamine(atc_code):
+                    frid_grp = 'NON_FRID'
             else:
                 atc_code, frid_grp, desc = tag_drug_atc(icode=ic, drug_name=d_name, generic_name=g_name, raw_group=rg, did=did_val, tmt_code=tmt_val)
                 tmt_code = tmt_val

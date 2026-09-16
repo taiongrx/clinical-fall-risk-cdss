@@ -14,6 +14,18 @@ if os.path.exists(csv_path):
     except Exception as e:
         print(f"[ATCTagger] Error loading manual_atc_mapping.csv: {e}")
 
+def is_sedating_antihistamine(atc_code: str) -> bool:
+    """
+    Returns True ONLY if the ATC code belongs to 1st-generation sedating antihistamines
+    per AGS Beers Criteria 2023 and STOPPFall 2021.
+    2nd-generation antihistamines (e.g. Cetirizine R06AE07, Loratadine R06AX13, Fexofenadine R06AX26)
+    have minimal BBB penetration and are NOT Fall-Risk-Increasing Drugs (FRIDs).
+    """
+    if not atc_code or not isinstance(atc_code, str):
+        return False
+    c = atc_code.strip().upper()
+    return any(c.startswith(pfx) for pfx in ['R06AA', 'R06AB', 'R06AD', 'R06AX02'])
+
 # Regex-based ATC Matching Rules for Hospital Formulary
 ATC_REGEX_RULES = [
     # 1. Sedatives & Hypnotics (N05BA, N05CD, N05CF)
@@ -30,6 +42,8 @@ ATC_REGEX_RULES = [
     (r'\b(ibuprofen|naproxen|diclofenac|celecoxib|etoricoxib|mefenamic|meloxicam|piroxicam|indomethacin|ketorolac|nabumetone|sulindac|aspirin 300|aspirin 500)\b', 'M01A', 'NSAIDs', 'Anti-inflammatory and Antirheumatic Products (NSAIDs)'),
     # 7. Antihistamines (1st Generation Sedating only per AGS Beers 2023 / STOPPFall 2021)
     (r'\b(chlorpheniramine|cpm|hydroxyzine|diphenhydramine|dimenhydrinate|cyproheptadine|brompheniramine|dexchlorpheniramine|triprolidine|carbinoxamine|clemastine|promethazine)\b', 'R06AB', 'ANTIHISTAMINE', 'First-generation Sedating Antihistamines'),
+    # 7b. Second-generation Non-sedating Antihistamines (Explicit NON_FRID per AGS Beers 2023 / STOPPFall 2021)
+    (r'\b(loratadine|cetirizine|fexofenadine|desloratadine|levocetirizine|bilastine|rupatadine)\b', 'R06AX', 'NON_FRID', 'Second-generation Non-sedating Antihistamines (Non-FRID)'),
     # 8. Diuretics (C03)
     (r'\b(furosemide|spironolactone|hydrochlorothiazide|hctz|indapamide|amiloride|acetazolamide|mannitol|torasemide)\b', 'C03', 'DIURETICS', 'Diuretics'),
     # 9. Alpha-1 Adrenergic Antagonists (G04CA, C02CA)
@@ -131,10 +145,21 @@ def save_drug_atc_mapping(
     did_clean = str(did).strip() if did else None
 
     if not frid_group:
-        inferred_grp, inferred_desc = map_atc_to_frid_group(atc_clean)
-        frid_group = inferred_grp or 'OTHER'
-        if not atc_desc:
-            atc_desc = inferred_desc or ''
+        if atc_clean.startswith('R06'):
+            if is_sedating_antihistamine(atc_clean):
+                frid_group = 'ANTIHISTAMINE'
+                atc_desc = atc_desc or 'First-generation Sedating Antihistamines'
+            else:
+                frid_group = 'NON_FRID'
+                atc_desc = atc_desc or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
+        else:
+            inferred_grp, inferred_desc = map_atc_to_frid_group(atc_clean)
+            frid_group = inferred_grp or 'OTHER'
+            if not atc_desc:
+                atc_desc = inferred_desc or ''
+    elif atc_clean.startswith('R06') and not is_sedating_antihistamine(atc_clean):
+        frid_group = 'NON_FRID'
+        atc_desc = atc_desc or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
 
     # 1. Update in-memory dict
     manual_dict[icode_clean] = atc_clean
@@ -453,6 +478,8 @@ def tag_drug_atc(
         frid_grp, desc = map_atc_to_frid_group(atc_code)
         if frid_grp:
             return atc_code, frid_grp, desc
+        if atc_code and atc_code.startswith('R06'):
+            return atc_code, 'NON_FRID', desc or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
         return atc_code, raw_group or 'OTHER', desc or 'ATC Mapped'
 
     # 1.1 Check cross-hospital DID 24-digit or TMT code if provided
@@ -472,6 +499,11 @@ def tag_drug_atc(
                 
                 if match_rec and match_rec.atc_code:
                     manual_dict[icode_str] = match_rec.atc_code
+                    if match_rec.atc_code.startswith('R06'):
+                        if is_sedating_antihistamine(match_rec.atc_code):
+                            return match_rec.atc_code, 'ANTIHISTAMINE', match_rec.atc_description or 'First-generation Sedating Antihistamines'
+                        else:
+                            return match_rec.atc_code, 'NON_FRID', match_rec.atc_description or 'Second-generation Non-sedating Antihistamines (Non-FRID)'
                     return match_rec.atc_code, match_rec.frid_group or 'OTHER', match_rec.atc_description or 'TMT Mapped'
         except Exception:
             pass

@@ -194,8 +194,9 @@ def extract_risk_factor_details(visit_row, med_df, diag_df, active_factors):
             if not med_df.empty:
                 for _, mr in med_df.iterrows():
                     g_safe = create_safe_col_name('drug_group', mr.get('group_name', ''))
-                    r_safe = create_safe_col_name('drug_group', mr.get('raw_group_name', ''))
-                    if g_safe == factor or r_safe == factor:
+                    # Strictly match on standardized group_name from ATC tagger.
+                    # NEVER fallback to raw_group_name to prevent non-FRIDs (e.g. Loratadine) from matching legacy HOSxP groupings.
+                    if g_safe == factor:
                         matched_meds.append(mr)
             
             if matched_meds:
